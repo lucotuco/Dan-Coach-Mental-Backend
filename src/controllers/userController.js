@@ -9,6 +9,47 @@ export async function listUsers(req, res, next) {
   }
 }
 
+export async function loginUser(req, res, next) {
+  try {
+    const { email, password } = req.body;
+
+    // 1) Validación básica
+    if (!email || !password) {
+      return res
+        .status(400)
+        .json({ message: 'Email y contraseña son obligatorios' });
+    }
+
+    // 2) Buscar usuario por email
+    const user = await User.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      // No existe un usuario con ese mail
+      return res
+        .status(401)
+        .json({ message: 'Credenciales inválidas (usuario no encontrado)' });
+    }
+
+    // 3) Comparar contraseña en texto plano
+    if (user.password !== password) {
+      return res
+        .status(401)
+        .json({ message: 'Credenciales inválidas (contraseña incorrecta)' });
+    }
+
+    // 4) Armar objeto de usuario sin la contraseña
+    const userObj = user.toObject();
+    delete userObj.password;
+
+    // 5) Devolver el usuario logueado
+    return res.json({
+      message: 'Login exitoso',
+      user: userObj,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
 export async function createUser(req, res, next) {
   try {
     const { name, email, phone, password } = req.body;
