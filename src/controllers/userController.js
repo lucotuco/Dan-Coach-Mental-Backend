@@ -49,32 +49,51 @@ export async function loginUser(req, res, next) {
   } catch (error) {
     next(error);
   }
-}
-export async function createUser(req, res, next) {
+}export async function createUser(req, res, next) {
   try {
-    const { name, email, phone, password } = req.body;
+    let { name, email, phone, password } = req.body;
 
-    // Validación básica
-    if (!name || !email) {
-      return res.status(400).json({ message: 'Nombre y email son obligatorios' });
+    // Normalizar valores (evitar espacios, mayúsculas en mail, etc.)
+    name = name?.trim();
+    email = email?.trim().toLowerCase();
+    phone = phone?.trim();
+
+    // 1) Validar que no falte ningún campo
+    const missingFields = [];
+    if (!name) missingFields.push('name');
+    if (!email) missingFields.push('email');
+    if (!phone) missingFields.push('phone');
+    if (!password) missingFields.push('password');
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        message: 'Faltan campos obligatorios',
+        missingFields, // por si querés mostrar cuáles faltan en el front
+      });
     }
 
-    // 👇 Buscar si ya existe un usuario con ese email
+    // 2) Verificar si ya existe un usuario con ese email
     const existingUser = await User.findOne({ email });
 
     if (existingUser) {
       // 409 = conflicto (recurso ya existe)
-      return res.status(409).json({ message: 'Ya existe un usuario registrado con ese email' });
+      return res
+        .status(409)
+        .json({ message: 'Ya existe un usuario registrado con ese email' });
     }
 
-    // Si no existe, lo creamos
+    // 3) Crear el usuario
     const user = await User.create({ name, email, phone, password });
 
-    res.status(201).json(user);
+    // Opcional: no devolver la contraseña al front
+    const userObj = user.toObject();
+    delete userObj.password;
+
+    return res.status(201).json(userObj);
   } catch (error) {
     next(error);
   }
-}
+} 
 export async function getUser(req, res,next) {
   try{
   // Get id from request parameters:
