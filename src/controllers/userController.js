@@ -11,7 +11,24 @@ export async function listUsers(req, res, next) {
 
 export async function createUser(req, res, next) {
   try {
-    const user = await User.create(req.body);
+    const { name, email, phone, password } = req.body;
+
+    // Validación básica
+    if (!name || !email) {
+      return res.status(400).json({ message: 'Nombre y email son obligatorios' });
+    }
+
+    // 👇 Buscar si ya existe un usuario con ese email
+    const existingUser = await User.findOne({ email });
+
+    if (existingUser) {
+      // 409 = conflicto (recurso ya existe)
+      return res.status(409).json({ message: 'Ya existe un usuario registrado con ese email' });
+    }
+
+    // Si no existe, lo creamos
+    const user = await User.create({ name, email, phone, password });
+
     res.status(201).json(user);
   } catch (error) {
     next(error);
