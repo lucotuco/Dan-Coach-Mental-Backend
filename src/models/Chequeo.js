@@ -49,4 +49,4 @@ const chequeoSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-export const Chequeo = mongoose.model('User', chequeoSchema);
+export const Chequeo = mongoose.model('Chequeo', chequeoSchema);
