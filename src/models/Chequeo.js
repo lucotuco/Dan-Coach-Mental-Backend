@@ -2,13 +2,13 @@ import mongoose from 'mongoose';
 
 const chequeoSchema = new mongoose.Schema(
   {
-    fecha: {
-      type: Date,
-      required: true,
-    },
     owner: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
+      required: true,
+    },
+    fecha: {
+      type: Date,
       required: true,
     },
     tipo: {
