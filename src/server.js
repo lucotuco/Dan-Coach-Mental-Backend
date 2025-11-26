@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import morgan from 'morgan';
 import userRoutes from './routes/userRoutes.js';
 import chequeoRoutes from './routes/chequeosRoutes.js';
+import danRoutes from './routes/danRoutes.js';
 import { connectToDatabase } from './config/mongo.js';
 
 dotenv.config();
@@ -28,7 +29,8 @@ app.get('/health', (req, res) => {
 });
 
 app.use('/api/users', userRoutes);
-app.use('/api/chequeos', chequeoRoutes)
+app.use('/api/chequeos', chequeoRoutes);
+app.use('/api/dan', danRoutes);
 
 app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
   console.error(err);
