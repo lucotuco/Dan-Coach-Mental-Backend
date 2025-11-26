@@ -15,8 +15,14 @@ export async function createCheck(req, res, next) {
       variable7,
     } = req.body;
 
-    if (!userId || !fecha || !tipo) {
-      return res.status(400).json({ message: 'userId, fecha y tipo son obligatorios' });
+    if (!userId ) {
+      return res.status(400).json({ message: 'userId son obligatorios' });
+    }
+    if ( !fecha ) {
+      return res.status(400).json({ message: 'fecha son obligatorios' });
+    }
+    if (!tipo) {
+      return res.status(400).json({ message: 'tipo son obligatorios' });
     }
 
     const chequeo = await Chequeo.create({
