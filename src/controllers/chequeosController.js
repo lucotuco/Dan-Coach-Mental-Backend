@@ -3,7 +3,7 @@ import { Chequeo } from '../models/Chequeo.js';
 export async function createCheck(req, res, next) {
   try {
     const {
-      ownerId,
+      owner,
       fecha,
       tipo,
       variable1,
@@ -18,9 +18,8 @@ export async function createCheck(req, res, next) {
     if ( !fecha ) {
       return res.status(400).json({ message: 'fecha son obligatorios' });
     }
-    if (!ownerId ) {
-      return res.status(400).json({ message: 'userId son obligatorios',ownerId });
-      console.log(ownerId);
+    if (!owner ) {
+      return res.status(400).json({ message: 'userId son obligatorios' });
     }
     if (!tipo) {
       return res.status(400).json({ message: 'tipo son obligatorios' });
@@ -30,7 +29,7 @@ export async function createCheck(req, res, next) {
     
 
     const chequeo = await Chequeo.create({
-      owner: ownerId,
+      owner,
       fecha,
       tipo,
       variable1,
