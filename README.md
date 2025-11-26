@@ -36,12 +36,48 @@ Este directorio contiene un ejemplo mínimo de backend en Node.js/Express conect
    ```
    - El servidor se levanta en `http://localhost:4000` (o el puerto que definas).
    - Si la conexión a MongoDB es exitosa verás `✅ MongoDB connection established` y luego `🚀 API listening...` en consola.
-4. **Prueba la API**
+4. **Variables para la integración con Dan (OpenAI)**
+   - Define `OPENAI_API_KEY` en tu `.env` para que el servicio de coaching mental funcione.
+   - Opcional: `DAN_MODEL` para cambiar el modelo por defecto (`gpt-4.1-mini`).
+5. **Prueba la API**
    - `GET http://localhost:4000/health` → estado del servicio.
-   - `GET http://localhost:4000/api/notes` → lista las notas guardadas.
-   - `POST http://localhost:4000/api/notes` con JSON `{ "title": "Hola", "body": "Mi primera nota" }` → crea una nota.
-5. **Conecta tu frontend**
+   - `POST http://localhost:4000/api/dan/chat` → conversación con Dan (ver detalles más abajo).
+6. **Conecta tu frontend**
    - Desde el frontend, usa `fetch`/`axios` hacia las rutas anteriores y asegúrate de apuntar a la misma URL que definiste en `CORS_ORIGIN`.
+
+### Endpoint `POST /api/dan/chat`
+
+Endpoint pensado para Expo/React Native que mantiene el contexto de la conversación con Dan usando el Responses API de OpenAI.
+
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+  ```json
+  {
+    "userId": "<id del usuario en MongoDB>",
+    "message": "Texto del usuario",
+    "type": "general" ,
+    "conversationId": "<opcional, si ya existe>",
+    "chequeoId": "<opcional, si nace de un chequeo>"
+  }
+  ```
+  - `type` agrupa conversaciones (por ejemplo: "chequeo", "rutina", etc.). Si no se envía, se usa `general`.
+  - `conversationId` permite reanudar una conversación existente; si no se envía, se busca la última por `type` o se crea una nueva.
+
+- **Response**:
+  ```json
+  {
+    "conversationId": "<id de la conversación>",
+    "message": "Respuesta de Dan",
+    "lastResponseId": "<id del Responses API para mantener contexto>",
+    "historySummary": "Resumen acumulado del diálogo",
+    "model": "gpt-4.1-mini",
+    "type": "general",
+    "userMessageId": "<id del mensaje de usuario guardado>",
+    "assistantMessageId": "<id del mensaje de Dan guardado>"
+  }
+  ```
+  - `historySummary` es el historial condensado que Dan usa como contexto junto con `previous_response_id`.
+  - El perfil deportivo del usuario (`danProfile` en el modelo `User`) se incluye automáticamente en el prompt.
 
 ## 3. Estructura de carpetas
 

@@ -16,6 +16,17 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    danProfile: {
+      sport: String,
+      position: String,
+      club: String,
+      category: String,
+      mainGoals: [String],
+    },
+    danCurrentConversationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'DanConversation',
+    },
   },
   { timestamps: true }
 );
