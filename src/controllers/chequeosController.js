@@ -1,7 +1,7 @@
 import { Chequeo } from '../models/Chequeo.js';
 export async function createCheck(req, res, next) {
   try {
-    console.log('BODY createCheck >>>', req.body);
+    
 
     const {
       owner,
@@ -24,8 +24,6 @@ export async function createCheck(req, res, next) {
     }
     if (!tipo) {
       return res.status(400).json({ message: 'tipo es obligatorio' });
-      // este console.log nunca se ejecuta porque está después del return
-      // console.log(userId);
     }
 
     const chequeo = await Chequeo.create({
@@ -41,7 +39,7 @@ export async function createCheck(req, res, next) {
       variable7,
     });
 
-    console.log('CHEQUEO CREADO >>>', chequeo);
+    
 
     res.status(201).json(chequeo);
   } catch (error) {
