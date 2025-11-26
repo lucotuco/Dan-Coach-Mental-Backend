@@ -22,7 +22,7 @@ export async function createCheck(req, res, next) {
       return res.status(400).json({ message: 'userId son obligatorios' });
     }
     if (!tipo) {
-      return res.status(400).json({ message: 'tipo son obligatorios' });
+      return res.status(400).json({ message: 'tipo son obligatorios', userId });
     }
     
     
