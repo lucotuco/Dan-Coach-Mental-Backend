@@ -1,4 +1,6 @@
-import { openai } from './openaiClient.js';
+import OpenAI from 'openai';
+
+export const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const defaultSystemPrompt = `Sos DAN, coach mental deportivo virtual.
 Meta: ayudar a deportistas a ganar calma, foco y mentalidad de crecimiento usando preguntas, respiración, visualización y pequeños planes de acción.
