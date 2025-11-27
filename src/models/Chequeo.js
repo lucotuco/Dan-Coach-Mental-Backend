@@ -43,6 +43,13 @@ const chequeoSchema = new mongoose.Schema(
       type: Number,
       required: false,
     },
+    audio: {
+      url: { type: String },
+      transcript: { type: String },
+      summary: { type: String },
+      tags: [{ type: String }],
+      durationSeconds: { type: Number },
+    },
   },
   { timestamps: true }
 );
