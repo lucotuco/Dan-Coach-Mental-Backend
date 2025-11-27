@@ -16,6 +16,23 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    birthDate: {
+      type: Date,
+      required: false,
+    },
+    sport: {
+      type: String,
+      required: false,
+    },
+    competitionType: {
+      type: String,
+      enum: ['individual', 'pareja', 'equipo'],
+      required: false,
+    },
+    level: {
+      type: String,
+      required: false,
+    },
     danProfile: {
       sport: String,
       position: String,

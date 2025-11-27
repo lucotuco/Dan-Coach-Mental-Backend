@@ -93,34 +93,101 @@ export async function loginUser(req, res, next) {
   } catch (error) {
     next(error);
   }
-} 
-export async function getUser(req, res,next) {
-  try{
-  // Get id from request parameters:
-  const { id } = req.params;
-  
-  const user = await User.findById(id);
-/* If a user object (document) has an id that matches id in the 
-     request parameters, set HTTP status to 200 & return that user object in
-     JSON format */
-  res.status(200).json(user);
+}export async function updateUser(req, res, next) {
+  try {
+    const { id } = req.params;
+    const {
+      name,
+      email,
+      phone,
+      password,
+      birthDate,
+      sport,
+      competitionType,
+      level,
+    } = req.body;
+
+    const allowedCompetitionTypes = ['individual', 'pareja', 'equipo'];
+    if (competitionType && !allowedCompetitionTypes.includes(competitionType)) {
+      return res.status(400).json({
+        message: 'competitionType debe ser individual, pareja o equipo',
+      });
+    }
+
+    let normalizedEmail;
+    if (email) {
+      normalizedEmail = email.trim().toLowerCase();
+      const existingUser = await User.findOne({ email: normalizedEmail, _id: { $ne: id } });
+      if (existingUser) {
+        return res
+          .status(409)
+          .json({ message: 'Ya existe un usuario registrado con ese email' });
+      }
+    }
+
+    let parsedBirthDate;
+    if (birthDate) {
+      parsedBirthDate = new Date(birthDate);
+      if (Number.isNaN(parsedBirthDate.getTime())) {
+        return res.status(400).json({ message: 'birthDate no es una fecha válida' });
+      }
+    }
+
+    const updateData = {};
+    if (name !== undefined) updateData.name = name.trim();
+    if (normalizedEmail !== undefined) updateData.email = normalizedEmail;
+    if (phone !== undefined) updateData.phone = phone.trim();
+    if (password !== undefined) updateData.password = password;
+    if (parsedBirthDate !== undefined) updateData.birthDate = parsedBirthDate;
+    if (sport !== undefined) updateData.sport = sport;
+    if (competitionType !== undefined) updateData.competitionType = competitionType;
+    if (level !== undefined) updateData.level = level;
+
+    const updatedUser = await User.findByIdAndUpdate(id, updateData, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: 'Usuario no encontrado' });
+    }
+
+    const userObj = updatedUser.toObject();
+    delete userObj.password;
+
+    return res.json(userObj);
   } catch (error) {
     next(error);
   }
-  /* If id is not a valid MongoDB ObjectId, set HTTP status to 400 (bad 
+}
+
+export async function getUser(req, res, next) {
+  try {
+    // Get id from request parameters:
+    const { id } = req.params;
+
+    const user = await User.findById(id);
+    /* If a user object (document) has an id that matches id in the
+       request parameters, set HTTP status to 200 & return that user object in
+       JSON format */
+    res.status(200).json(user);
+  } catch (error) {
+    next(error);
+  }
+  /* If id is not a valid MongoDB ObjectId, set HTTP status to 400 (bad
      request) and return error message in JSON form */
   /*if (!mongoose.Types.ObjectId.isValid(id)) {
      return res.status(400).json({ error: "Bad request (invalid id)" });
   }*/
 
-  /* assign user to document in DB that has id that matches the 
+  /* assign user to document in DB that has id that matches the
      id defined in this method: */
-  
+
   /* If no user id in database matches id from the request parameter,
      set HTTP status to 404 and return error message in JSON form */
   /*if (!user) {
     return res.status(404).json({ error: "User doesn't exist" });
   }
 */
-  
+
 };

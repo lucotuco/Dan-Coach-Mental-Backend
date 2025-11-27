@@ -1,8 +1,9 @@
 import { Router } from 'express';
-import { createCheck } from '../controllers/chequeosController.js';
+import { createCheck, listChecksByTypeAndOwner } from '../controllers/chequeosController.js';
 
 const router = Router();
 
+router.get('/', listChecksByTypeAndOwner);
 router.post('/', createCheck);
 
 export default router;

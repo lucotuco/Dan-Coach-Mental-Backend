@@ -47,3 +47,24 @@ export async function createCheck(req, res, next) {
     next(error);
   }
 }
+
+export async function listChecksByTypeAndOwner(req, res, next) {
+  try {
+    const { owner, tipo } = req.query;
+
+    if (!owner) {
+      return res.status(400).json({ message: 'owner es obligatorio' });
+    }
+
+    if (!tipo) {
+      return res.status(400).json({ message: 'tipo es obligatorio' });
+    }
+
+    const chequeos = await Chequeo.find({ owner, tipo }).sort({ fecha: -1 });
+
+    res.json(chequeos);
+  } catch (error) {
+    console.error('ERROR listChecksByTypeAndOwner >>>', error);
+    next(error);
+  }
+}
