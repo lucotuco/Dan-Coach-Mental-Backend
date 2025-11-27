@@ -2,6 +2,7 @@ import { DanConversation } from '../models/DanConversation.js';
 import { DanMessage } from '../models/DanMessage.js';
 import { User } from '../models/User.js';
 import { chatWithDan } from '../services/danCoach.js';
+import { Chequeo } from '../models/Chequeo.js';
 
 export async function chatWithDanController(req, res, next) {
   try {
@@ -45,7 +46,17 @@ export async function chatWithDanController(req, res, next) {
       text: message,
     });
 
-    const reply = await chatWithDan({ user, conversation, messageText: message });
+    const chequeos = await Chequeo.find({ owner: userId })
+      .sort({ fecha: -1 })
+      .limit(5);
+
+    const reply = await chatWithDan({
+      user,
+      conversation,
+      messageText: message,
+      chequeos,
+    });
+
 
     const assistantMessage = await DanMessage.create({
       conversationId: conversation._id,

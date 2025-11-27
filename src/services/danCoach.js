@@ -124,11 +124,12 @@ function buildProfileSummary(user) {
   const profile = user?.danProfile || {};
   const goals = Array.isArray(profile.mainGoals) ? profile.mainGoals.join(', ') : '';
   const summaryParts = [
-    profile.sport && `Deporte: ${profile.sport}`,
-    profile.position && `Posición: ${profile.position}`,
-    profile.club && `Club: ${profile.club}`,
-    profile.category && `Categoría: ${profile.category}`,
-    goals && `Objetivos principales: ${goals}`,
+    user?.name && `Nombre: ${user.name}`,
+    user?.birthDate && `Fecha de nacimiento: ${new Date(user.birthDate).toISOString().slice(0, 10)}`,
+    user?.sport && `Deporte principal: ${user.sport}`,
+    user?.competitionType && `Tipo de competencia: ${user.competitionType}`,
+    user?.level && `Nivel declarado: ${user.level}`,
+    profile.sport && `Deporte (perfil DAN): ${profile.sport}`,
   ].filter(Boolean);
 
   if (!summaryParts.length) {
@@ -138,9 +139,40 @@ function buildProfileSummary(user) {
   return summaryParts.join(' | ');
 }
 
-function buildSystemMessage(user, conversation) {
+function buildChequeosSummary(chequeos = []) {
+  if (!Array.isArray(chequeos) || chequeos.length === 0) {
+    return 'Sin chequeos registrados.';
+  }
+
+  return chequeos
+    .map((chequeo) => {
+      const date = chequeo.fecha
+        ? new Date(chequeo.fecha).toISOString().slice(0, 10)
+        : 'Fecha no disponible';
+
+      const variables = [
+        chequeo.variable1 !== undefined && `v1:${chequeo.variable1}`,
+        chequeo.variable2 !== undefined && `v2:${chequeo.variable2}`,
+        chequeo.variable3 !== undefined && `v3:${chequeo.variable3}`,
+        chequeo.variable4 !== undefined && `v4:${chequeo.variable4}`,
+        chequeo.variable5 !== undefined && `v5:${chequeo.variable5}`,
+        chequeo.variable6 !== undefined && `v6:${chequeo.variable6}`,
+        chequeo.variable7 !== undefined && `v7:${chequeo.variable7}`,
+      ]
+        .filter(Boolean)
+        .join(', ');
+
+      const variablesSummary = variables || 'Sin variables registradas';
+
+      return `Chequeo (${chequeo.tipo || 'sin tipo'}) - Fecha: ${date} - ${variablesSummary}`;
+    })
+    .join(' \n ');
+}
+
+function buildSystemMessage(user, conversation, chequeos) {
   const profileSummary = buildProfileSummary(user);
   const previousSummary = conversation?.historySummary || 'Sin historial previo.';
+  const chequeosSummary = buildChequeosSummary(chequeos);
 
   return [
     defaultSystemPrompt,
@@ -157,13 +189,14 @@ function buildHistorySummary(existingSummary, userMessage, danReply) {
   return parts.join('\n');
 }
 
-export async function chatWithDan({ user, conversation, messageText }) {
+
+export async function chatWithDan({ user, conversation, messageText, chequeos = [] }) {
   if (!openai.apiKey) {
     throw new Error('OpenAI API key is missing. Set OPENAI_API_KEY.');
   }
 
   const model = process.env.DAN_MODEL || 'gpt-4.1-mini';
-  const systemPrompt = buildSystemMessage(user, conversation);
+  const systemPrompt = buildSystemMessage(user, conversation, chequeos);
 
   const response = await openai.responses.create({
     model,

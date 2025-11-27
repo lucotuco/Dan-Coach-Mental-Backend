@@ -57,10 +57,11 @@ export async function listChecksByTypeAndOwner(req, res, next) {
     }
 
     if (!tipo) {
-      return res.status(400).json({ message: 'tipo es obligatorio' });
+      const chequeos = await Chequeo.find({ owner, tipo }).sort({ fecha: -1 });
     }
-
-    const chequeos = await Chequeo.find({ owner, tipo }).sort({ fecha: -1 });
+    else{
+      const chequeos = await Chequeo.find({ owner }).sort({ fecha: -1 });
+    }
 
     res.json(chequeos);
   } catch (error) {
