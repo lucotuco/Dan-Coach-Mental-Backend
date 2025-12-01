@@ -1,15 +1,56 @@
 import fs from 'fs';
+import { toFile } from 'openai';
 import { Chequeo } from '../models/Chequeo.js';
 import { openai } from '../services/openaiClient.js';
 
 const SUMMARY_MODEL = process.env.DAN_MODEL || 'gpt-4o-mini';
 
-export async function transcribeAudio(filePath) {
+export async function transcribeAudio(uploadedFile) {
   try {
-    const fileStream = fs.createReadStream(filePath);
+    console.log('Transcribing audio file >>>', {
+      path: uploadedFile.path,
+      mimetype: uploadedFile.mimetype,
+      originalname: uploadedFile.originalname,
+      size: uploadedFile.size,
+    });
+
+    // Leemos el archivo que guardó multer
+    const buffer = await fs.promises.readFile(uploadedFile.path);
+
+    // Mapear el mimetype de multer a uno soportado por OpenAI
+    const mimetype = uploadedFile.mimetype || '';
+
+    const safeMime =
+      mimetype.includes('webm') ? 'audio/webm' :
+      mimetype.includes('wav') ? 'audio/wav' :
+      mimetype.includes('ogg') || mimetype.includes('oga') ? 'audio/ogg' :
+      mimetype.includes('mpeg') || mimetype.includes('mp3') ? 'audio/mpeg' :
+      mimetype.includes('mp4') || mimetype.includes('m4a') || mimetype.includes('aac') ? 'audio/m4a' :
+      null;
+
+    if (!safeMime) {
+      console.warn('Formato de audio no soportado por Whisper:', mimetype);
+      throw new Error(
+        'El formato de audio no es compatible. Probá grabar en calidad alta (m4a/webm) o actualizá la app.'
+      );
+    }
+
+    const ext =
+      safeMime === 'audio/webm' ? '.webm' :
+      safeMime === 'audio/wav' ? '.wav' :
+      safeMime === 'audio/ogg' ? '.ogg' :
+      safeMime === 'audio/mpeg' ? '.mp3' :
+      '.m4a';
+
+    // Creamos un "File" entendible por el SDK de OpenAI
+    const openaiFile = await toFile(buffer, `chequeo${ext}`, {
+      contentType: safeMime,
+    });
+
     const response = await openai.audio.transcriptions.create({
+      // podés usar 'whisper-1' o los nuevos modelos como 'gpt-4o-mini-transcribe'
       model: 'whisper-1',
-      file: fileStream,
+      file: openaiFile,
       language: 'es',
     });
 
@@ -19,6 +60,7 @@ export async function transcribeAudio(filePath) {
     throw error;
   }
 }
+
 
 async function getSummaryAndTagsFromTranscript(transcript) {
   const completion = await openai.chat.completions.create({
