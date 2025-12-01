@@ -20,45 +20,48 @@ export async function transcribeAudio(filePath) {
   }
 }
 
-export async function getSummaryAndTagsFromTranscript(transcript) {
-  if (!transcript) {
-    return { summary: '', tags: [] };
-  }
+async function getSummaryAndTagsFromTranscript(transcript) {
+  const completion = await openai.chat.completions.create({
+    model: SUMMARY_MODEL,
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Sos un coach mental deportivo. Vas a analizar la transcripción de un audio de un deportista y devolver SOLO JSON válido.',
+      },
+      {
+        role: 'user',
+        content: `
+Transcripción del audio (en español):
+"""${transcript}"""
+
+Quiero que devuelvas un JSON con este formato EXACTO:
+{
+  "summary": "resumen breve de 2-3 líneas en español",
+  "tags": ["tag1", "tag2", "tag3"]
+}
+
+Las tags deben ser pocas palabras en minúscula relacionadas con el estado mental/emocional o temas mencionados (por ejemplo: "ansiedad", "confianza baja", "motivación alta", "lesión", "cansancio").
+        `.trim(),
+      },
+    ],
+    temperature: 0.3,
+  });
+
+  const content = completion.choices[0]?.message?.content ?? '';
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: SUMMARY_MODEL,
-      messages: [
-        {
-          role: 'system',
-          content:
-            'Sos un coach mental deportivo. Devuelve únicamente un JSON válido con resumen y tags en español.',
-        },
-        {
-          role: 'user',
-          content: `Transcripción en español:\n${transcript}\n\nDevolvé solo un objeto JSON con el formato {"summary": "resumen breve de 2-3 líneas en español", "tags": ["tag1", "tag2", "tag3"]}.`,
-        },
-      ],
-      temperature: 0.3,
-    });
-
-    const content = completion.choices?.[0]?.message?.content?.trim();
-    if (!content) {
-      return { summary: '', tags: [] };
-    }
-
     const parsed = JSON.parse(content);
-    const tags = Array.isArray(parsed.tags)
-      ? parsed.tags.map((tag) => (typeof tag === 'string' ? tag : String(tag)))
-      : [];
-
     return {
       summary: parsed.summary || '',
-      tags,
+      tags: Array.isArray(parsed.tags) ? parsed.tags : [],
     };
-  } catch (error) {
-    console.error('ERROR getSummaryAndTagsFromTranscript >>>', error);
-    return { summary: '', tags: [] };
+  } catch (err) {
+    console.error('Error parseando JSON de summary/tags >>>', err);
+    return {
+      summary: '',
+      tags: [],
+    };
   }
 }
 
