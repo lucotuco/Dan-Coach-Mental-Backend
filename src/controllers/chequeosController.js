@@ -5,27 +5,43 @@ import { openai } from '../services/openaiClient.js';
 
 const SUMMARY_MODEL = process.env.DAN_MODEL || 'gpt-4o-mini';
 
+
 export async function transcribeAudio(uploadedFile) {
   try {
     console.log('Transcribing audio file >>>', {
       hasBuffer: !!uploadedFile?.buffer,
+      hasPath: !!uploadedFile?.path,
       mimetype: uploadedFile?.mimetype,
       originalname: uploadedFile?.originalname,
       size: uploadedFile?.size,
     });
 
-    if (!uploadedFile || !uploadedFile.buffer) {
+    if (!uploadedFile) {
+      throw new Error('No se recibió archivo de audio.');
+    }
+
+    let buffer;
+
+    // 👇 1) Preferimos buffer si existe (memoryStorage)
+    if (uploadedFile.buffer && uploadedFile.buffer.length > 0) {
+      buffer = uploadedFile.buffer;
+    }
+    // 👇 2) Si no hay buffer, probamos leer desde el path (diskStorage)
+    else if (uploadedFile.path) {
+      buffer = await fs.promises.readFile(uploadedFile.path);
+    }
+
+    if (!buffer || buffer.length === 0) {
       throw new Error('No se pudo leer el audio subido (buffer vacío).');
     }
 
-    const buffer = uploadedFile.buffer;
     const mimetype = uploadedFile.mimetype || '';
 
-    // Mapear mimetype a uno que sabemos que Whisper soporta
+    // Mapear mimetype a uno razonable soportado por Whisper
     let safeMime = mimetype;
 
     if (!/(webm|wav|ogg|oga|mpeg|mp3|mp4|m4a)/.test(safeMime)) {
-      // si no estamos seguros, forzamos algo razonable
+      // Si no reconocemos el tipo, forzamos algo razonable
       safeMime = 'audio/m4a';
     }
 
@@ -53,6 +69,7 @@ export async function transcribeAudio(uploadedFile) {
     throw error;
   }
 }
+
 
 
 
@@ -130,7 +147,7 @@ export async function createCheck(req, res, next) {
     let audioData = audio;
 
     if (req.file) {
-      const transcript = await transcribeAudio(req.file.path);
+      const transcript = await transcribeAudio(req.file);
       const { summary, tags } = await getSummaryAndTagsFromTranscript(transcript);
 
       audioData = {
@@ -139,12 +156,13 @@ export async function createCheck(req, res, next) {
         summary,
         tags,
       };
-
+    if (req.file.path) {
       try {
         await fs.promises.unlink(req.file.path);
       } catch (cleanupError) {
         console.warn('No se pudo eliminar el archivo temporal de audio', cleanupError);
       }
+    }
     }
 
     const chequeo = await Chequeo.create({
