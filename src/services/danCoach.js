@@ -161,7 +161,7 @@ function buildChequeosSummary(chequeos = []) {
         .join(', ');
 
       const variablesSummary = variables || 'Sin variables registradas';
-        consoleLog(chequeo.audio);
+        console.log(chequeo.audio);
         
         const contextoAudio = chequeo.audio.summary;
         const audioTags= chequeo.audio.tags;
