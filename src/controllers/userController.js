@@ -128,6 +128,7 @@ export async function loginUser(req, res, next) {
     }
 
     const updateData = {};
+    console.log(`parsedBirthDate${parsedBirthDate}`)
     if (parsedBirthDate !== undefined) updateData.birthDate = parsedBirthDate;
     if (sport !== undefined) updateData.sport = sport;
     if (competitionType !== undefined) updateData.competitionType = competitionType;
@@ -138,7 +139,7 @@ export async function loginUser(req, res, next) {
       new: true,
       //runValidators: true,
     });
-    console.log(`user a actualizar: ${updatedUser}`);
+    console.log(`user actualizado: ${updatedUser}`);
     if (!updatedUser) {
       return res.status(404).json({ message: 'Usuario no encontrado' });
     }
