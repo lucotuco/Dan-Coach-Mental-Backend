@@ -8,13 +8,13 @@ const SUMMARY_MODEL = process.env.DAN_MODEL || 'gpt-4o-mini';
 
 export async function transcribeAudio(uploadedFile) {
   try {
-    console.log('Transcribing audio file >>>', {
+    /*console.log('Transcribing audio file >>>', {
       hasBuffer: !!uploadedFile?.buffer,
       hasPath: !!uploadedFile?.path,
       mimetype: uploadedFile?.mimetype,
       originalname: uploadedFile?.originalname,
       size: uploadedFile?.size,
-    });
+    });*/
 
     if (!uploadedFile) {
       throw new Error('No se recibió archivo de audio.');
@@ -142,10 +142,9 @@ export async function createCheck(req, res, next) {
     }
 
     let audioData = audio;
-console.log('entr a create chek');
     if (req.file) {
       const transcript = await transcribeAudio(req.file);
-      console.log(transcript);
+      
       const { summary, tags } = await getSummaryAndTagsFromTranscript(transcript);
 
       audioData = {

@@ -61,7 +61,7 @@ export async function loginUser(req, res, next) {
     // 1) Validar que no falte ningún campo
     const missingFields = [];
     if (!name) missingFields.push('name');
-    if (!email) missingFields.push('email');
+    if (!email || !email.includes('@gmail.com')) missingFields.push('email');
     if (!phone) missingFields.push('phone');
     if (!password) missingFields.push('password');
 
@@ -97,10 +97,6 @@ export async function loginUser(req, res, next) {
   try {
     const { id } = req.params;
     const {
-      name,
-      email,
-      phone,
-      password,
       birthDate,
       sport,
       competitionType,
@@ -123,6 +119,7 @@ export async function loginUser(req, res, next) {
           .status(409)
           .json({ message: 'Ya existe un usuario registrado con ese email' });
       }
+      
     }
 
     let parsedBirthDate;

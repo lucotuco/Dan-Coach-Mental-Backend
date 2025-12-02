@@ -33,16 +33,12 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: false,
     },
-    danProfile: {
-      sport: String,
-      position: String,
-      club: String,
-      category: String,
-      mainGoals: [String],
-    },
-    danCurrentConversationId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'DanConversation',
+    goals: {
+      url: { type: String },
+      transcript: { type: String },
+      summary: { type: String },
+      tags: [{ type: String }],
+      durationSeconds: { type: Number },
     },
   },
   { timestamps: true }
