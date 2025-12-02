@@ -137,6 +137,10 @@ export async function loginUser(req, res, next) {
     }
 
     const updateData = {};
+    if (name !== undefined) updateData.name = name.trim();
+    if (normalizedEmail !== undefined) updateData.email = normalizedEmail;
+    if (phone !== undefined) updateData.phone = phone.trim();
+    if (password !== undefined) updateData.password = password;
     if (parsedBirthDate !== undefined) updateData.birthDate = parsedBirthDate;
     if (sport !== undefined) updateData.sport = sport;
     if (competitionType !== undefined) updateData.competitionType = competitionType;
