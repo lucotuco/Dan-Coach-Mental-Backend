@@ -133,9 +133,10 @@ export async function loginUser(req, res, next) {
     if (competitionType !== undefined) updateData.competitionType = competitionType;
     if (level !== undefined) updateData.level = level;
 
+    console.log(updateData);
     const updatedUser = await User.findByIdAndUpdate(id, updateData, {
       new: true,
-      runValidators: true,
+      //runValidators: true,
     });
     console.log(updatedUser);
     if (!updatedUser) {
