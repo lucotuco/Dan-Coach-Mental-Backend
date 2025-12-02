@@ -161,8 +161,11 @@ function buildChequeosSummary(chequeos = []) {
         .join(', ');
 
       const variablesSummary = variables || 'Sin variables registradas';
-
-      return `Chequeo (${chequeo.tipo || 'sin tipo'}) - Fecha: ${date} - ${variablesSummary}`;
+      if (!chequeo.audio){
+        const contextoAudio = chequeo.audio.summary;
+        const audioTags= chequeo.audio.tags;
+      }
+      return `Chequeo (${chequeo.tipo || 'sin tipo'}) - Fecha: ${date} - ${variablesSummary} - audio resumen:${contextoAudio} - audi tags${audioTags}`;
     })
     .join(' \n ');
 }
@@ -176,6 +179,7 @@ function buildSystemMessage(user, conversation, chequeos) {
     defaultSystemPrompt,
     `Perfil del usuario: ${profileSummary}`,
     `Resumen del historial: ${previousSummary}`,
+    `Resumen de los chequeos: ${chequeosSummary}`,
     'Refuerza hábitos saludables, manejo emocional y motivación. Si pides claridad, hazlo con preguntas breves.',
   ].join('\n');
 }
