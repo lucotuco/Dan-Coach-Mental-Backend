@@ -101,12 +101,12 @@ export async function loginUser(req, res, next) {
   }
 }export async function updateUser(req, res, next) {
   try {
-    const { id } = req.params;
     const {
-      birthDate,
+      id,
       sport,
-      competitionType,
       level,
+      competitionType,
+      birthDate,
     } = req.body;
 
     const allowedCompetitionTypes = ['individual', 'pareja', 'equipo'];
