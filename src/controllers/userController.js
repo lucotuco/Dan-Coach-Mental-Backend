@@ -57,11 +57,12 @@ export async function loginUser(req, res, next) {
     name = name?.trim();
     email = email?.trim().toLowerCase();
     phone = phone?.trim();
+    console.log(phone);
 
     // 1) Validar que no falte ningún campo
     const missingFields = [];
     if (!name) missingFields.push('name');
-    if (!email || !email.includes('@gmail.com')) missingFields.push('email');
+    if (!email) missingFields.push('email');
     if (!phone) missingFields.push('phone');
     if (!password) missingFields.push('password');
 
@@ -71,6 +72,11 @@ export async function loginUser(req, res, next) {
         missingFields, // por si querés mostrar cuáles faltan en el front
       });
     }
+    /*    ACTIVAR DSP!!!!!!!!!!!!!!!!!!
+
+    if(!normalizedEmail.includes('@gmail.com')){
+         return res.status(409).json({ message: 'El email ingresado no es valido' });
+      }*/
 
     // 2) Verificar si ya existe un usuario con ese email
     const existingUser = await User.findOne({ email });
