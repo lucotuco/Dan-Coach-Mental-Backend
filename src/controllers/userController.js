@@ -111,14 +111,20 @@ export async function loginUser(req, res, next) {
       competitionType,
       birthDate,
     } = req.body;
-    console.log('req.body: '+ req.body);
-    const allowedCompetitionTypes = ['Individual', 'En pareja', 'En equipo'];
+
+    console.log('Body recibido en /cargarInfo:', req.body);
+
+    if (!id) {
+      return res.status(400).json({ message: 'Falta el id del usuario' });
+    }
+
+    const allowedCompetitionTypes = ['individual', 'pareja', 'equipo'];
     if (competitionType && !allowedCompetitionTypes.includes(competitionType)) {
       return res.status(400).json({
         message: 'competitionType debe ser individual, pareja o equipo',
       });
     }
-    //console.log(`user del front: ${id}`);
+
     let parsedBirthDate;
     if (birthDate) {
       parsedBirthDate = new Date(birthDate);
@@ -133,12 +139,15 @@ export async function loginUser(req, res, next) {
     if (competitionType !== undefined) updateData.competitionType = competitionType;
     if (level !== undefined) updateData.level = level;
 
-    //console.log(`data a actualizar: ${updateData}`);
+    console.log('Datos a actualizar:', updateData);
+
     const updatedUser = await User.findByIdAndUpdate(id, updateData, {
       new: true,
-      //runValidators: true,
+      // runValidators: true,
     });
-    //console.log(`user actualizado: ${updatedUser}`);
+
+    console.log('Usuario actualizado:', updatedUser && updatedUser._id);
+
     if (!updatedUser) {
       return res.status(404).json({ message: 'Usuario no encontrado' });
     }
@@ -146,11 +155,16 @@ export async function loginUser(req, res, next) {
     const userObj = updatedUser.toObject();
     delete userObj.password;
 
-    return res.json(userObj);
+    return res.json({
+      message: 'Usuario actualizado correctamente',
+      user: userObj,
+    });
   } catch (error) {
+    console.error('Error en updateUser:', error);
     next(error);
   }
 }
+
 
 export async function getUser(req, res, next) {
   try {

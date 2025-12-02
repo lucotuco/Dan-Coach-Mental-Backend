@@ -9,6 +9,6 @@ router.get('/', listUsers);
 router.post('/', createUser);
 router.get('/:id', getUser);
 router.post('/login', loginUser);
-router.post('/cargarInfo', upload.single('audio'),updateUser)
+router.post('/cargarInfo',updateUser)
 
 export default router;
