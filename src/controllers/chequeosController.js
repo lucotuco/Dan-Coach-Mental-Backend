@@ -70,9 +70,6 @@ export async function transcribeAudio(uploadedFile) {
   }
 }
 
-
-
-
 async function getSummaryAndTagsFromTranscript(transcript) {
   const completion = await openai.chat.completions.create({
     model: SUMMARY_MODEL,
@@ -90,7 +87,7 @@ Transcripción del audio (en español):
 
 Quiero que devuelvas un JSON con este formato EXACTO:
 {
-  "summary": "resumen breve de 2-3 líneas en español",
+  "summary": "resumen breve de 1-2 líneas en español",
   "tags": ["tag1", "tag2", "tag3"]
 }
 
@@ -148,6 +145,7 @@ export async function createCheck(req, res, next) {
 
     if (req.file) {
       const transcript = await transcribeAudio(req.file);
+      console.log(transcript);
       const { summary, tags } = await getSummaryAndTagsFromTranscript(transcript);
 
       audioData = {
