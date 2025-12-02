@@ -95,7 +95,10 @@ export async function loginUser(req, res, next) {
     const userObj = user.toObject();
     delete userObj.password;
 
-    return res.status(201).json(userObj);
+    return res.json({
+      message: 'creacion de usuario exitoso',
+      user: userObj,
+    });
   } catch (error) {
     next(error);
   }
