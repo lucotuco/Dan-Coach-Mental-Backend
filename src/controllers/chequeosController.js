@@ -142,7 +142,7 @@ export async function createCheck(req, res, next) {
     }
 
     let audioData = audio;
-
+console.log('entr a create chek');
     if (req.file) {
       const transcript = await transcribeAudio(req.file);
       console.log(transcript);
