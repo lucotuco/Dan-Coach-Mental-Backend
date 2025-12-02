@@ -134,7 +134,7 @@ export async function loginUser(req, res, next) {
       new: true,
       runValidators: true,
     });
-
+    console.log(updatedUser);
     if (!updatedUser) {
       return res.status(404).json({ message: 'Usuario no encontrado' });
     }
