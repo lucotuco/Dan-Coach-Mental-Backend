@@ -118,7 +118,7 @@ export async function loginUser(req, res, next) {
         message: 'competitionType debe ser individual, pareja o equipo',
       });
     }
-    console.log(`user del front: ${id}`);
+    //console.log(`user del front: ${id}`);
     let parsedBirthDate;
     if (birthDate) {
       parsedBirthDate = new Date(birthDate);
@@ -133,12 +133,12 @@ export async function loginUser(req, res, next) {
     if (competitionType !== undefined) updateData.competitionType = competitionType;
     if (level !== undefined) updateData.level = level;
 
-    console.log(`data a actualizar: ${updateData}`);
+    //console.log(`data a actualizar: ${updateData}`);
     const updatedUser = await User.findByIdAndUpdate(id, updateData, {
       new: true,
       //runValidators: true,
     });
-    console.log(`user actualizado: ${updatedUser}`);
+    //console.log(`user actualizado: ${updatedUser}`);
     if (!updatedUser) {
       return res.status(404).json({ message: 'Usuario no encontrado' });
     }
