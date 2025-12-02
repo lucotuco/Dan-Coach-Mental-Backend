@@ -57,7 +57,7 @@ export async function loginUser(req, res, next) {
     name = name?.trim();
     email = email?.trim().toLowerCase();
     phone = phone?.trim();
-    console.log(phone);
+    
 
     // 1) Validar que no falte ningún campo
     const missingFields = [];
@@ -114,18 +114,6 @@ export async function loginUser(req, res, next) {
       return res.status(400).json({
         message: 'competitionType debe ser individual, pareja o equipo',
       });
-    }
-
-    let normalizedEmail;
-    if (email) {
-      normalizedEmail = email.trim().toLowerCase();
-      const existingUser = await User.findOne({ email: normalizedEmail, _id: { $ne: id } });
-      if (existingUser) {
-        return res
-          .status(409)
-          .json({ message: 'Ya existe un usuario registrado con ese email' });
-      }
-      
     }
 
     let parsedBirthDate;
