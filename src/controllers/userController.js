@@ -111,8 +111,8 @@ export async function loginUser(req, res, next) {
       competitionType,
       birthDate,
     } = req.body;
-
-    const allowedCompetitionTypes = ['individual', 'pareja', 'equipo'];
+    console.log(`req.body:  ${req.body}`);
+    const allowedCompetitionTypes = ['Individual', 'En pareja', 'En equipo'];
     if (competitionType && !allowedCompetitionTypes.includes(competitionType)) {
       return res.status(400).json({
         message: 'competitionType debe ser individual, pareja o equipo',
@@ -128,7 +128,6 @@ export async function loginUser(req, res, next) {
     }
 
     const updateData = {};
-    console.log(`parsedBirthDate${parsedBirthDate}`)
     if (parsedBirthDate !== undefined) updateData.birthDate = parsedBirthDate;
     if (sport !== undefined) updateData.sport = sport;
     if (competitionType !== undefined) updateData.competitionType = competitionType;
