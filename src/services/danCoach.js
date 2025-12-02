@@ -161,10 +161,11 @@ function buildChequeosSummary(chequeos = []) {
         .join(', ');
 
       const variablesSummary = variables || 'Sin variables registradas';
-      if (!chequeo.audio){
+        consoleLog(chequeo.audio);
+        
         const contextoAudio = chequeo.audio.summary;
         const audioTags= chequeo.audio.tags;
-      }
+      
       return `Chequeo (${chequeo.tipo || 'sin tipo'}) - Fecha: ${date} - ${variablesSummary} - audio resumen:${contextoAudio} - audi tags${audioTags}`;
     })
     .join(' \n ');
