@@ -111,7 +111,7 @@ export async function loginUser(req, res, next) {
       competitionType,
       birthDate,
     } = req.body;
-    console.log(`req.body:  ${req.body}`);
+    console.log('req.body: '+ req.body);
     const allowedCompetitionTypes = ['Individual', 'En pareja', 'En equipo'];
     if (competitionType && !allowedCompetitionTypes.includes(competitionType)) {
       return res.status(400).json({
