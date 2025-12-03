@@ -70,7 +70,7 @@ export async function transcribeAudio(uploadedFile) {
   }
 }
 
-async function getSummaryAndTagsFromTranscript(transcript) {
+export async function getSummaryAndTagsFromTranscript(transcript) {
   const completion = await openai.chat.completions.create({
     model: SUMMARY_MODEL,
     messages: [
