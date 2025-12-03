@@ -10,7 +10,7 @@ router.post('/', createUser);
 router.get('/:id', getUser);
 router.post('/login', loginUser);
 router.post('/cargarInfo',updateUser);
-router.post('/meta/Audio', upload.single('audio'),updateUserGoalA);
+router.post('/metaAudio', upload.single('audio'),updateUserGoalA);
 router.post('/metaTexto',updateUserGoalT)
 
 export default router;
