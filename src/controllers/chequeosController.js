@@ -88,7 +88,7 @@ Transcripción del audio (en español):
 Quiero que devuelvas un JSON con este formato EXACTO:
 {
   "summary": "resumen breve de 1-2 líneas en español",
-  "tags": ["tag1", "tag2", "tag3"]
+  "tags": ["tag1", "tag2"]
 }
 
 Las tags deben ser pocas palabras en minúscula relacionadas con el estado mental/emocional o temas mencionados (por ejemplo: "ansiedad", "confianza baja", "motivación alta", "lesión", "cansancio").

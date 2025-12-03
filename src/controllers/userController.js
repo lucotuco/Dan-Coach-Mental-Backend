@@ -1,4 +1,5 @@
 import { User } from '../models/User.js';
+import { getSummaryAndTagsFromTranscript, transcribeAudio } from '../controllers/chequeosController.js'
 
 export async function listUsers(req, res, next) {
   try {
@@ -49,7 +50,7 @@ export async function loginUser(req, res, next) {
   } catch (error) {
     next(error);
   }
-}export async function createUser(req, res, next) {
+} export async function createUser(req, res, next) {
   try {
     let { name, email, phone, password } = req.body;
 
@@ -57,7 +58,7 @@ export async function loginUser(req, res, next) {
     name = name?.trim();
     email = email?.trim().toLowerCase();
     phone = phone?.trim();
-    
+
 
     // 1) Validar que no falte ningún campo
     const missingFields = [];
@@ -102,7 +103,7 @@ export async function loginUser(req, res, next) {
   } catch (error) {
     next(error);
   }
-}export async function updateUser(req, res, next) {
+} export async function updateUser(req, res, next) {
   try {
     const {
       id,
@@ -195,4 +196,90 @@ export async function getUser(req, res, next) {
   }
 */
 
+};
+
+export async function updateUserGoalA(req, res, next) {
+  try {
+    const
+      {
+        meta,
+      } = req.body;
+
+    let audioData = meta;
+    if (req.file) {
+      const transcript = await transcribeAudio(req.file);
+
+      const { summary, tags } = await getSummaryAndTagsFromTranscript(transcript);
+
+      audioData = {
+        url: null,
+        transcript,
+        summary,
+        tags,
+      };
+      if (req.file.path) {
+        try {
+          await fs.promises.unlink(req.file.path);
+        } catch (cleanupError) {
+          console.warn('No se pudo eliminar el archivo temporal de audio', cleanupError);
+        }
+      }
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(id, audioData, {
+      new: true,
+      // runValidators: true,
+    });
+
+    console.log('Usuario actualizado:', updatedUser && updatedUser._id);
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: 'Usuario no encontrado' });
+    }
+
+    const userObj = updatedUser.toObject();
+    delete userObj.password;
+
+    return res.json({
+      message: 'Usuario actualizado correctamente',
+      user: userObj,
+    });
+
+  } catch (error) {
+    console.error('Error en updateUserGoalA:', error);
+    next(error);
+  }
+};
+
+export async function updateUserGoalT(req, res, next) {
+  try {
+    const
+      {
+        meta
+      } = req.body;
+    if (!meta) {
+      return res.status(400).json({ message: 'Falta el id del usuario' });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(id, meta, {
+      new: true,
+      // runValidators: true,
+    });
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: 'Usuario no encontrado' });
+    }
+
+    const userObj = updatedUser.toObject();
+    delete userObj.password;
+
+    return res.json({
+      message: 'Usuario actualizado correctamente',
+      user: userObj,
+    });
+
+  } catch (error) {
+    console.error('Error en updateUserGoalT:', error);
+    next(error);
+  }
 };
