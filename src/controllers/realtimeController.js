@@ -50,14 +50,14 @@ export const getRealtimeClientSecret = async (req, res) => {
         .sort({ fecha: -1 })
         .limit(3)
         .lean();
+        console.log(lastChecks);
 
       if (lastChecks.length > 0) {
         const resumen = lastChecks
           .map((c) => {
             const fecha = c.fecha?.toISOString?.().slice(0, 10);
-            return `- ${fecha} (${c.tipo}) v1=${c.variable1 ?? '-'} v2=${c.variable2 ?? '-'} v3=${
-              c.variable3 ?? '-'
-            }`;
+            return `- ${fecha} (${c.tipo}) v1=${c.variable1 ?? '-'} v2=${c.variable2 ?? '-'} v3=${c.variable3 ?? '-'
+              }`;
           })
           .join('\n');
 
@@ -93,10 +93,11 @@ Usá esta info SOLO como contexto. Volvé a preguntarle cómo se siente hoy para
           model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
           instructions,
           audio: {
-              output: {
-                voice: "ash", 
-                      }
-                 }
+            output: 
+            {
+              voice: "ash",
+            }
+          }
           // Opcional: si querés texto + audio
           //output_modalities: ['audio', 'text'],
           // Podés tunear la parte de audio acá si más adelante lo necesitás
