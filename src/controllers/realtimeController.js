@@ -94,7 +94,7 @@ Usá esta info SOLO como contexto. Volvé a preguntarle cómo se siente hoy para
           instructions,
           audio: {
               output: {
-                voice: "Onyx", 
+                voice: "cedar", 
                       }
                  }
           // Opcional: si querés texto + audio
