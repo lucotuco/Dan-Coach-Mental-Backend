@@ -75,7 +75,7 @@ function buildChequeosSummary(chequeos = []) {
     .join(' \n ');
 }
 
-function buildSystemMessage(user, conversation, chequeos) {
+export function buildSystemMessage(user, conversation, chequeos) {
   const profileSummary = buildProfileSummary(user);
   const previousSummary = conversation?.historySummary || 'Sin historial previo.';
   const chequeosSummary = buildChequeosSummary(chequeos);

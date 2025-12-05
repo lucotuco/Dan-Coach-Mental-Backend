@@ -1,5 +1,6 @@
 // src/controllers/realtimeController.js
 import { Chequeo } from '../models/Chequeo.js'; // opcional, si querés contexto
+import { buildCoachContext } from '../services/coachContext.js';
 // Si usás Node 18+ no hace falta importar 'node-fetch', ya tenés fetch global.
 
 const DAN_BASE_INSTRUCTIONS = `Sos DAN, coach mental deportivo virtual. Meta: ayudar a deportistas a ganar calma, foco y mentalidad de crecimiento usando preguntas, respiración, visualización y pequeños planes de acción. Sos coach mental, guía calmo, facilitador, entrenador de hábitos y observador sin juicio. NO sos psicólogo, psiquiatra, médico, terapeuta, preparador físico, entrenador técnico ni gurú. No des diagnósticos ni consejos médicos ni sobre medicación. No enseñes técnica deportiva (cómo golpear, correr, etc.), solo mente, foco y hábitos.
@@ -38,38 +39,12 @@ export const getRealtimeClientSecret = async (req, res) => {
         .status(500)
         .json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
     }
-
-    // (Opcional) info del usuario logueado
     const userId = req.user?._id;
     const userName = req.user?.name ?? 'deportista';
 
-    // (Opcional) traemos algunos chequeos recientes para darle contexto a DAN
-    let extraContext = '';
-    if (userId) {
-      const lastChecks = await Chequeo.find({ owner: userId })
-        .sort({ fecha: -1 })
-        .limit(3)
-        .lean();
-        console.log(lastChecks);
+    console.log(userId);
 
-      if (lastChecks.length > 0) {
-        const resumen = lastChecks
-          .map((c) => {
-            const fecha = c.fecha?.toISOString?.().slice(0, 10);
-            return `- ${fecha} (${c.tipo}) v1=${c.variable1 ?? '-'} v2=${c.variable2 ?? '-'} v3=${c.variable3 ?? '-'
-              }`;
-          })
-          .join('\n');
-
-        extraContext = `
-El usuario se llama ${userName}.
-Últimos chequeos registrados:
-${resumen}
-
-Usá esta info SOLO como contexto. Volvé a preguntarle cómo se siente hoy para actualizarla.
-`.trim();
-      }
-    }
+  const extraContext = buildCoachContext(userId);
 
     const instructions =
       DAN_BASE_INSTRUCTIONS + (extraContext ? `\n\n${extraContext}` : '');
