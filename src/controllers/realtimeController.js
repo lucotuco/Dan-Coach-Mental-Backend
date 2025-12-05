@@ -92,7 +92,11 @@ Usá esta info SOLO como contexto. Volvé a preguntarle cómo se siente hoy para
           type: 'realtime',
           model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
           instructions,
-          voice: "Onyx"
+          audio: {
+              output: {
+                voice: "Onyx", 
+                      }
+                 }
           // Opcional: si querés texto + audio
           //output_modalities: ['audio', 'text'],
           // Podés tunear la parte de audio acá si más adelante lo necesitás
