@@ -39,12 +39,16 @@ export const getRealtimeClientSecret = async (req, res) => {
         .status(500)
         .json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
     }
-    const userId = req.user?._id;
-    const userName = req.user?.name ?? 'deportista';
-
-    console.log(userId);
-
-  const extraContext = buildCoachContext(userId);
+    let extraContext = '';
+    if (userId) {
+      try {
+        
+        extraContext = await buildCoachContext(userId);
+      } catch (err) {
+        console.error('Error armando contexto de coach:', err);
+        extraContext = '';
+      }
+    }
 
     const instructions =
       DAN_BASE_INSTRUCTIONS + (extraContext ? `\n\n${extraContext}` : '');
@@ -68,7 +72,7 @@ export const getRealtimeClientSecret = async (req, res) => {
           model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
           instructions,
           audio: {
-            output: 
+            output:
             {
               voice: "ash",
             }
