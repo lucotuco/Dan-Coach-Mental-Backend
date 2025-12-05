@@ -44,7 +44,6 @@ export const getRealtimeClientSecret = async (req, res) => {
     if (userId) {
       try {
         extraContext = await buildCoachContext(userId);
-        console.log(userId);
       } catch (err) {
         console.error('Error armando contexto de coach:', err);
         extraContext = '';
@@ -53,6 +52,7 @@ export const getRealtimeClientSecret = async (req, res) => {
 
     const instructions =
       DAN_BASE_INSTRUCTIONS + (extraContext ? `\n\n${extraContext}` : '');
+      console.log(extraContext);
 
     // Llamamos a la API oficial para crear un client_secret efímero
     // Docs: POST https://api.openai.com/v1/realtime/client_secrets :contentReference[oaicite:1]{index=1}
