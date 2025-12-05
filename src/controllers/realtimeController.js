@@ -41,10 +41,10 @@ export const getRealtimeClientSecret = async (req, res) => {
     }
     const userId = req.query.userId;
     let extraContext = '';
-    console.log(userId);
     if (userId) {
       try {
         extraContext = await buildCoachContext(userId);
+        console.log(userId);
       } catch (err) {
         console.error('Error armando contexto de coach:', err);
         extraContext = '';
