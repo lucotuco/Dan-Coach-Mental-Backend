@@ -39,10 +39,10 @@ export const getRealtimeClientSecret = async (req, res) => {
         .status(500)
         .json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
     }
+    const userId = req.query.userId;
     let extraContext = '';
     if (userId) {
       try {
-        
         extraContext = await buildCoachContext(userId);
       } catch (err) {
         console.error('Error armando contexto de coach:', err);
