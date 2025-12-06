@@ -200,12 +200,13 @@ export async function getUser(req, res, next) {
 
 export async function updateUserGoalA(req, res, next) {
   try {
-    const
-      {
-        meta,
-      } = req.body;
+    const {id} = req.body;
 
-    let audioData = meta;
+    if (!id) {
+      return res.status(400).json({ message: 'Falta el id del usuario' });
+    }
+
+    let audioData = null;
     if (req.file) {
       const transcript = await transcribeAudio(req.file);
 
@@ -226,10 +227,9 @@ export async function updateUserGoalA(req, res, next) {
       }
     }
 
-    const updatedUser = await User.findByIdAndUpdate(id, audioData, {
-      new: true,
-      // runValidators: true,
-    });
+    const updatedUser = await User.findByIdAndUpdate(id, 
+      {goalAudio: audioData},
+      {new: true});
 
     console.log('Usuario actualizado:', updatedUser && updatedUser._id);
 
@@ -253,18 +253,20 @@ export async function updateUserGoalA(req, res, next) {
 
 export async function updateUserGoalT(req, res, next) {
   try {
-    const
-      {
-        meta
-      } = req.body;
-    if (!meta) {
+    const { id, meta } = req.body;
+
+    if (!id) {
       return res.status(400).json({ message: 'Falta el id del usuario' });
     }
+    if (!meta) {
+      return res.status(400).json({ message: 'Falta el texto de la meta' });
+    }
 
-    const updatedUser = await User.findByIdAndUpdate(id, meta, {
-      new: true,
-      // runValidators: true,
-    });
+    const updatedUser = await User.findByIdAndUpdate(
+      id,
+      { goalT: meta },
+      { new: true }
+    );
 
     if (!updatedUser) {
       return res.status(404).json({ message: 'Usuario no encontrado' });
@@ -277,9 +279,8 @@ export async function updateUserGoalT(req, res, next) {
       message: 'Usuario actualizado correctamente',
       user: userObj,
     });
-
   } catch (error) {
     console.error('Error en updateUserGoalT:', error);
     next(error);
   }
-};
+}

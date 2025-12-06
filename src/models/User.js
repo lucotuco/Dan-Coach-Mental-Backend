@@ -36,13 +36,17 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: false,
     },
-    goals: {
+    goalA: {
       url: { type: String },
       transcript: { type: String },
       summary: { type: String },
       tags: [{ type: String }],
       durationSeconds: { type: Number },
     },
+    goalT:{
+      type: String,
+      required: false,
+    }
   },
   { timestamps: true }
 );
