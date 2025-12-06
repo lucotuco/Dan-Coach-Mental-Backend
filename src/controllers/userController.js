@@ -231,7 +231,7 @@ export async function updateUserGoalA(req, res, next) {
       {goalAudio: audioData},
       {new: true});
 
-    console.log('Usuario actualizado:', updatedUser && updatedUser._id);
+    console.log('Usuario actualizado:', updatedUser && updatedUser._id, audioData);
 
     if (!updatedUser) {
       return res.status(404).json({ message: 'Usuario no encontrado' });
