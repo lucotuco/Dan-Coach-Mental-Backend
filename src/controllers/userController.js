@@ -1,5 +1,6 @@
 import { User } from '../models/User.js';
 import { getSummaryAndTagsFromTranscript, transcribeAudio } from '../controllers/chequeosController.js'
+import fs from 'fs';
 
 export async function listUsers(req, res, next) {
   try {
@@ -254,6 +255,7 @@ export async function updateUserGoalA(req, res, next) {
 export async function updateUserGoalT(req, res, next) {
   try {
     const { id, meta } = req.body;
+    console.log('Body /metaTexto', req.body);
 
     if (!id) {
       return res.status(400).json({ message: 'Falta el id del usuario' });
