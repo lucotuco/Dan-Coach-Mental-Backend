@@ -12,17 +12,20 @@ export async function buildCoachContext(userId) {
     .limit(5)
     .lean();
 
-  const userContext = [
-    `Nombre: ${user.name ?? 'Sin nombre'}`,
-    user.deporte && `Deporte: ${user.deporte}`,
-    user.posicion && `Posición: ${user.posicion}`,
-    user.edad && `Edad: ${user.edad}`,
-    user.nivel && `Nivel: ${user.nivel}`,
-    if(metaTexto == undefined){
-      user.metaAudio && `Meta resumen: ${user.goalA.summary} - Tags: ${user.goalA.tags}`
-    };
-    
-  ]
+ const userContext: string[] = [];
+
+userContext.push(`Nombre: ${user.name ?? 'Sin nombre'}`);
+
+if (user.deporte)   userContext.push(`Deporte: ${user.deporte}`);
+if (user.posicion)  userContext.push(`Posición: ${user.posicion}`);
+if (user.edad)      userContext.push(`Edad: ${user.edad}`);
+if (user.nivel)     userContext.push(`Nivel: ${user.nivel}`);
+if (user.goalT)   
+{
+  userContext.push(`Meta: ${user.goalT}`);
+}
+else userContext.push(`Meta resumen: ${user.goalA.summary} - tags: ${user.goalA.tags?.join(', ')}`)
+
     .filter(Boolean)
     .join('\n');
 
