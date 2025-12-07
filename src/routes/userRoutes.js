@@ -3,7 +3,8 @@ import multer from 'multer';
 import { createUser, listUsers,getUser,loginUser,updateUser,updateUserGoalA,updateUserGoalT } from '../controllers/userController.js';
 
 const router = Router();
-const upload = multer();
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
 
 router.get('/', listUsers);
 router.post('/', createUser);

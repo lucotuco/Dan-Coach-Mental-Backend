@@ -201,39 +201,49 @@ export async function getUser(req, res, next) {
 
 export async function updateUserGoalA(req, res, next) {
   try {
-    const {id} = req.body;
+    const { id } = req.body;
+
+    console.log('Content-Type:', req.headers['content-type']);
+    console.log('Body /metaAudio recibido:', req.body);
+    console.log('File /metaAudio recibido:', req.file);
 
     if (!id) {
       return res.status(400).json({ message: 'Falta el id del usuario' });
     }
 
-    let audioData = null;
-    console.log('file que llega: ',req.file);
-    if (req.file) {
-      const transcript = await transcribeAudio(req.file);
+    if (!req.file) {
+      // 🔴 si entra acá, el problema es 100% de cómo llega el FormData desde el front
+      return res.status(400).json({ message: 'No se recibió archivo de audio' });
+    }
 
-      const { summary, tags } = await getSummaryAndTagsFromTranscript(transcript);
-      console.log('summary: ',summary ,'tags: ', tags)
-      audioData = {
-        url: null,
-        transcript,
-        summary,
-        tags,
-      };
-      if (req.file.path) {
-        try {
-          await fs.promises.unlink(req.file.path);
-        } catch (cleanupError) {
-          console.warn('No se pudo eliminar el archivo temporal de audio', cleanupError);
-        }
+    let audioData = null;
+
+    const transcript = await transcribeAudio(req.file);
+    const { summary, tags } = await getSummaryAndTagsFromTranscript(transcript);
+
+    audioData = {
+      url: null,
+      transcript,
+      summary,
+      tags,
+    };
+
+    // si algún día usás diskStorage, esto limpia archivo temporal
+    if (req.file.path) {
+      try {
+        await fs.promises.unlink(req.file.path);
+      } catch (cleanupError) {
+        console.warn('No se pudo eliminar el archivo temporal de audio', cleanupError);
       }
     }
 
-    const updatedUser = await User.findByIdAndUpdate(id, 
-      {goalAudio: audioData},
-      {new: true});
+    const updatedUser = await User.findByIdAndUpdate(
+      id,
+      { goalAudio: audioData },
+      { new: true }
+    );
 
-    console.log('Usuario actualizado:', updatedUser && updatedUser._id, audioData);
+    console.log('Usuario actualizado (audio):', updatedUser && updatedUser._id);
 
     if (!updatedUser) {
       return res.status(404).json({ message: 'Usuario no encontrado' });
