@@ -212,7 +212,7 @@ export async function updateUserGoalA(req, res, next) {
       const transcript = await transcribeAudio(req.file);
 
       const { summary, tags } = await getSummaryAndTagsFromTranscript(transcript);
-
+      console.log('summary: ',summary ,'tags: ', tags)
       audioData = {
         url: null,
         transcript,
