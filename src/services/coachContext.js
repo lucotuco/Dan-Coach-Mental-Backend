@@ -17,7 +17,11 @@ export async function buildCoachContext(userId) {
     user.deporte && `Deporte: ${user.deporte}`,
     user.posicion && `Posición: ${user.posicion}`,
     user.edad && `Edad: ${user.edad}`,
-    user.nivel && `Nivel: ${user.nivel}`, // amateur / profesional, etc.
+    user.nivel && `Nivel: ${user.nivel}`,
+    if(metaTexto == undefined){
+      user.metaAudio && `Meta resumen: ${user.goalA.summary} - Tags: ${user.goalA.tags}`
+    };
+    
   ]
     .filter(Boolean)
     .join('\n');
@@ -37,7 +41,10 @@ export async function buildCoachContext(userId) {
         .filter(Boolean)
         .join(', ');
 
-      return `- ${fecha} | tipo: ${ch.tipo}${vars ? ` | ${vars}` : ''}`;
+        const contextoAudio = chequeo.audio.summary;
+        const audioTags= chequeo.audio.tags;
+
+      return `- ${fecha} | tipo: ${ch.tipo}${vars ? ` | ${vars}` : ''} | audio resumen:${contextoAudio} | audi tags${audioTags} `;
     })
     .join('\n');
 
