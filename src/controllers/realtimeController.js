@@ -75,7 +75,7 @@ export const getRealtimeClientSecret = async (req, res) => {
           audio: {
             output:
             {
-              voice: "ash",
+              voice: "verse",
             }
           }
           // Opcional: si querés texto + audio
