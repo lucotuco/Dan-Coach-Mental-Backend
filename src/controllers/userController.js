@@ -208,6 +208,7 @@ export async function updateUserGoalA(req, res, next) {
     }
 
     let audioData = null;
+    console.log('file que llega: ',req.file);
     if (req.file) {
       const transcript = await transcribeAudio(req.file);
 
