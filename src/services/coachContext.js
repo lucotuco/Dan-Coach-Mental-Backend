@@ -12,7 +12,7 @@ export async function buildCoachContext(userId) {
     .limit(5)
     .lean();
 
- const userContext: string[] = [];
+const userContext = [];
 
 userContext.push(`Nombre: ${user.name ?? 'Sin nombre'}`);
 
