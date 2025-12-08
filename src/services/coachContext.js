@@ -14,7 +14,7 @@ export async function buildCoachContext(userId) {
 
 const userContext = [];
 
-userContext.push(`Nombre: ${user.name ?? 'Sin nombre'}`);
+userContext.push(`Nombre: ${user.name}`);
 
 if (user.deporte)   userContext.push(`Deporte: ${user.deporte}`);
 if (user.posicion)  userContext.push(`Posición: ${user.posicion}`);
