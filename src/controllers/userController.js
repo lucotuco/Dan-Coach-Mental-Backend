@@ -117,6 +117,7 @@ export async function createUser(req, res, next) {
     });
   } catch (error) {
     next(error);
+    console.log
   }
 } export async function updateUser(req, res, next) {
   try {
