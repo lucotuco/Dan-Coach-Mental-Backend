@@ -1,6 +1,7 @@
 import { User } from '../models/User.js';
-import { getSummaryAndTagsFromTranscript, transcribeAudio } from '../controllers/chequeosController.js'
+import { getSummaryAndTagsFromTranscript, transcribeAudio } from '../controllers/chequeosController.js';
 import fs from 'fs';
+import jwt from 'jsonwebtoken';
 
 export async function listUsers(req, res, next) {
   try {
@@ -43,15 +44,28 @@ export async function loginUser(req, res, next) {
     const userObj = user.toObject();
     delete userObj.password;
 
-    // 5) Devolver el usuario logueado
+    // 5) Generar token y devolver el usuario logueado
+    const secret = process.env.JWT_SECRET;
+
+    if (!secret) {
+      return res.status(500).json({ message: 'Falta la clave de JWT' });
+    }
+
+    const token = jwt.sign({ userId: user._id }, secret, {
+      expiresIn: '7d',
+    });
+
     return res.json({
       message: 'Login exitoso',
       user: userObj,
+      token,
     });
   } catch (error) {
     next(error);
   }
-} export async function createUser(req, res, next) {
+}
+
+export async function createUser(req, res, next) {
   try {
     let { name, email, phone, password } = req.body;
 

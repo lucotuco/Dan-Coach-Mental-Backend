@@ -6,6 +6,7 @@ import chequeoRoutes from './routes/chequeosRoutes.js';
 import danRoutes from './routes/danRoutes.js';
 import realtimeRoutes from './routes/realtimeRoutes.js';
 import { connectToDatabase } from './config/mongo.js';
+import { authMiddleware } from './middleware/authMiddleware.js';
 
 dotenv.config();
 
@@ -24,6 +25,8 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+app.use(authMiddleware);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
