@@ -19,10 +19,10 @@ export async function buildCoachContext(userId) {
 
   userContextParts.push(`Nombre: ${user.name ?? 'Sin nombre'}`);
 
-  if (user.deporte)  userContextParts.push(`Deporte: ${user.deporte}`);
+  if (user.sport)  userContextParts.push(`Deporte: ${user.deporte}`);
   if (user.posicion) userContextParts.push(`Posición: ${user.posicion}`);
   if (user.edad)     userContextParts.push(`Edad: ${user.edad}`);
-  if (user.nivel)    userContextParts.push(`Nivel: ${user.nivel}`);
+  if (user.level)    userContextParts.push(`Nivel: ${user.nivel}`);
 
   // Meta por TEXTO
   if (user.goalT) {
