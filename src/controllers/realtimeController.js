@@ -50,7 +50,7 @@ export const getRealtimeClientSecret = async (req, res) => {
         extraContext = '';
       }
     }
-
+    console.log('extra context: ', extraContext)
     const instructions =
       DAN_BASE_INSTRUCTIONS + (extraContext ? `\n\n${extraContext}` : '');
       
