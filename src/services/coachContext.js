@@ -1,6 +1,7 @@
 // src/services/coachContext.js
 import { User } from '../models/User.js';
 import { Chequeo } from '../models/Chequeo.js';
+import { CoachSession } from '../models/CoachSession.js';
 
 export async function buildCoachContext(userId) {
   const user = await User.findById(userId).lean();
@@ -12,6 +13,14 @@ export async function buildCoachContext(userId) {
     .limit(5)
     .lean();
 
+  // Última sesión en vivo (realtime)
+  const ultimaSesion = await CoachSession.findOne({
+    owner: userId,
+    canal: 'realtime',
+  })
+    .sort({ fecha: -1 })
+    .lean();
+
   //
   // ---------- CONTEXTO DEL USUARIO ----------
   //
@@ -19,10 +28,18 @@ export async function buildCoachContext(userId) {
 
   userContextParts.push(`Nombre: ${user.name ?? 'Sin nombre'}`);
 
-  if (user.sport)  userContextParts.push(`Deporte: ${user.deporte}`);
-  if (user.posicion) userContextParts.push(`Posición: ${user.posicion}`);
-  if (user.edad)     userContextParts.push(`Edad: ${user.edad}`);
-  if (user.level)    userContextParts.push(`Nivel: ${user.nivel}`);
+  if (user.deporte || user.sport) {
+    userContextParts.push(`Deporte: ${user.deporte || user.sport}`);
+  }
+  if (user.posicion) {
+    userContextParts.push(`Posición: ${user.posicion}`);
+  }
+  if (user.edad) {
+    userContextParts.push(`Edad: ${user.edad}`);
+  }
+  if (user.nivel || user.level) {
+    userContextParts.push(`Nivel: ${user.nivel || user.level}`);
+  }
 
   // Meta por TEXTO
   if (user.goalT) {
@@ -36,11 +53,10 @@ export async function buildCoachContext(userId) {
       tagsArray.length > 0 ? tagsArray.join(', ') : '(sin tags)';
 
     userContextParts.push(
-      `Meta resumen: ${summary} - tags: ${tagsText}`
+      `Meta resumen: ${summary} - tags: ${tagsText}`,
     );
   }
 
-  // Ahora sí, filtramos falsy y lo convertimos en string:
   const userContext = userContextParts.filter(Boolean).join('\n');
 
   //
@@ -64,7 +80,6 @@ export async function buildCoachContext(userId) {
         .filter(Boolean)
         .join(', ');
 
-      // Si tu modelo de Chequeo tiene algo como ch.audio:
       const audioSummary = ch.audio?.summary;
       const audioTags = Array.isArray(ch.audio?.tags)
         ? ch.audio.tags.join(', ')
@@ -85,6 +100,31 @@ export async function buildCoachContext(userId) {
     .join('\n');
 
   //
+  // ---------- CONTEXTO DE ÚLTIMA SESIÓN EN VIVO ----------
+  //
+  let sesionesContext = 'Sin sesiones en vivo registradas aún';
+
+  if (ultimaSesion) {
+    const fechaSesion = ultimaSesion.fecha
+      ? new Date(ultimaSesion.fecha).toISOString().split('T')[0]
+      : 'sin fecha';
+
+    const puntos =
+      Array.isArray(ultimaSesion.puntosClave) &&
+      ultimaSesion.puntosClave.length > 0
+        ? '\n  - ' + ultimaSesion.puntosClave.join('\n  - ')
+        : '';
+
+    const proximo = ultimaSesion.proximoPaso
+      ? `\nPróximo paso acordado: ${ultimaSesion.proximoPaso}`
+      : '';
+
+    sesionesContext = `Última sesión en vivo (${fechaSesion}): ${
+      ultimaSesion.resumen || '(sin resumen)'
+    }${puntos}${proximo}`;
+  }
+
+  //
   // ---------- STRING FINAL ----------
   //
   const contextString = `
@@ -93,6 +133,9 @@ ${userContext || 'Sin datos de usuario'}
 
 [ULTIMOS CHEQUEOS]
 ${chequeosContext || 'Sin chequeos registrados aún'}
+
+[SESIONES EN VIVO]
+${sesionesContext}
 `.trim();
 
   return contextString;

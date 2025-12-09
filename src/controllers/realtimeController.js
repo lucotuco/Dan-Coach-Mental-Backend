@@ -1,7 +1,6 @@
 // src/controllers/realtimeController.js
-import { Chequeo } from '../models/Chequeo.js'; // opcional, si querés contexto
 import { buildCoachContext } from '../services/coachContext.js';
-// Si usás Node 18+ no hace falta importar 'node-fetch', ya tenés fetch global.
+import { CoachSession } from '../models/CoachSession.js';
 
 const DAN_BASE_INSTRUCTIONS = `Sos DAN, coach mental deportivo virtual. Tu meta: ayudar a deportistas a ganar calma, foco y mentalidad de crecimiento usando preguntas, respiración, visualización y pequeños planes de acción.
 
@@ -19,7 +18,9 @@ Estilo de conversación (tiempo real): Respondé como si hablaras por audio en v
 
 Flujo flexible de la charla (guía flexible, no pasos obligatorios): 1) Conexión inicial: Bienvenida cálida, por ejemplo: “Hola [nombre], estoy acá para ayudarte. ¿Qué te gustaría trabajar hoy?”. 2) Validar y entender: Reconocé la emoción: “Suena a que fue intenso / frustrante / duro.”. Hacé preguntas abiertas para entender: “¿Qué fue lo que más te quedó dando vueltas?”, “¿Cuándo empezó a pasar eso?”. 3) Explorar sin juicio (hechos): Preguntá por los hechos antes de interpretar: “¿Qué pasó exactamente en la jugada / competencia / entrenamiento?”. 4) Preguntas poderosas (estilo GROW): Usá preguntas del tipo: “¿Qué te gustaría que pase la próxima vez?”, “¿Qué parte de esto sí podés controlar ahora mismo?”, “¿Qué opción pequeña podrías probar?”. 5) Elegir UNA herramienta práctica (solo si suma en ese momento): Explicala simple y aplicada a lo que contó el deportista. Algunas opciones: Respiración: box 4-4-4-4, 4-7-8, 3 respiraciones profundas conscientes. Visualización: recordar mejores momentos, activar confianza natural, amor por el deporte, imaginarse manejando bien el error o el miedo. Rutina mental: antes de competir, después de competir, antes de un gesto técnico, pausa emocional rápida, ritual de foco. Cognitivo: observación sin juicio, detectar un patrón mental, usar una palabra ancla, reencuadre positivo, preguntas poderosas. 6) Micro-plan (acción mínima y concreta): Ayudá a cerrar con un paso muy chiquito y específico, por ejemplo: “En el próximo punto, probá observar la pelota con curiosidad.”, “Cuando sientas frustración, hacé una respiración y repetí tu palabra ancla.”. 7) Cierre positivo y realista: Cerrá resaltando el esfuerzo y el proceso, por ejemplo: “Esto lleva tiempo y práctica, y ya estás haciendo un buen trabajo al mirarlo así.”.
 
-Forma de las respuestas: Respuestas cortas y claras. Priorizá la conexión y la comprensión sobre seguir todos los pasos. Siempre que tenga sentido, dejá una pregunta abierta para seguir explorando lo que el deportista está viviendo. Si te dan información sobre sus últimos chequeos, entrenamientos o metas, usala para personalizar las preguntas y las herramientas cuando lo creas necesario.`.trim();
+Forma de las respuestas: Respuestas cortas y claras. Priorizá la conexión y la comprensión sobre seguir todos los pasos. Siempre que tenga sentido, dejá una pregunta abierta para seguir explorando lo que el deportista está viviendo. Si te dan información sobre sus últimos chequeos, entrenamientos o metas, usala para personalizar las preguntas y las herramientas cuando lo creas necesario.
+
+Memoria de sesiones: cuando el usuario diga que quiere terminar o cerrar la llamada (por ejemplo: “cortemos por hoy”, “dejémoslo acá”), antes de despedirte llamá EXACTAMENTE UNA VEZ a la herramienta save_session_summary (si está disponible). En "summary": escribí en primera persona del deportista, máximo 4 frases sobre lo que trabajaron hoy. En "keyMoments": poné hasta 3 momentos o ideas clave en bullets cortos. En "nextStep": escribí un solo próximo paso concreto que se lleva para practicar. Si la conversación fue muy breve y no se trabajó nada, no llames a la herramienta.`.trim();
 
 /**
  * GET /api/realtime/client-secret
@@ -33,9 +34,11 @@ export const getRealtimeClientSecret = async (req, res) => {
         .status(500)
         .json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
     }
+
     const userId = req.query.userId;
     let extraContext = '';
-    console.log(userId);
+    console.log('userId backend:', userId);
+
     if (userId) {
       try {
         extraContext = await buildCoachContext(userId);
@@ -44,41 +47,38 @@ export const getRealtimeClientSecret = async (req, res) => {
         extraContext = '';
       }
     }
-    console.log('extra context: ', extraContext)
+
+    console.log('extra context: ', extraContext);
+
     const instructions =
       DAN_BASE_INSTRUCTIONS + (extraContext ? `\n\n${extraContext}` : '');
-      
 
-    // Llamamos a la API oficial para crear un client_secret efímero
-    // Docs: POST https://api.openai.com/v1/realtime/client_secrets :contentReference[oaicite:1]{index=1}
-    const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
+    const response = await fetch(
+      'https://api.openai.com/v1/realtime/client_secrets',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          expires_after: {
+            anchor: 'created_at',
+            seconds: 600,
+          },
+          session: {
+            type: 'realtime',
+            model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
+            instructions,
+            audio: {
+              output: {
+                voice: 'verse',
+              },
+            },
+          },
+        }),
       },
-      body: JSON.stringify({
-        // cuánto dura el token efímero (ej: 10 minutos)
-        expires_after: {
-          anchor: 'created_at',
-          seconds: 600,
-        },
-        session: {
-          type: 'realtime',
-          model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
-          instructions,
-          audio: {
-            output:
-            {
-              voice: "verse",
-            }
-          }
-          // Opcional: si querés texto + audio
-          //output_modalities: ['audio', 'text'],
-          // Podés tunear la parte de audio acá si más adelante lo necesitás
-        },
-      }),
-    });
+    );
 
     if (!response.ok) {
       const text = await response.text();
@@ -90,14 +90,45 @@ export const getRealtimeClientSecret = async (req, res) => {
     }
 
     const clientSecret = await response.json();
-
-    // Formato de ejemplo desde la API:
-    // { value: "ek_...", expires_at: 1234567890, session: {...} } :contentReference[oaicite:2]{index=2}
     return res.json(clientSecret);
   } catch (err) {
     console.error('Error en getRealtimeClientSecret:', err);
     return res
       .status(500)
       .json({ error: 'Error interno al generar el client_secret' });
+  }
+};
+
+/**
+ * POST /api/realtime/sessions
+ * La tool del agente llama a este endpoint para guardar el resumen de la sesión.
+ */
+export const saveRealtimeSessionSummary = async (req, res) => {
+  try {
+    const { userId, summary, keyMoments, nextStep, model } = req.body;
+
+    if (!userId || !summary) {
+      return res
+        .status(400)
+        .json({ message: 'Faltan userId o summary en el body' });
+    }
+
+    // opcional: podrías validar que req.user.id === userId, si tu authMiddleware lo setea
+
+    const sessionDoc = await CoachSession.create({
+      owner: userId,
+      canal: 'realtime',
+      resumen: summary,
+      puntosClave: Array.isArray(keyMoments) ? keyMoments : [],
+      proximoPaso: nextStep || '',
+      modelo: model || process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
+    });
+
+    return res.status(201).json({ ok: true, session: sessionDoc });
+  } catch (err) {
+    console.error('Error guardando resumen realtime:', err);
+    return res
+      .status(500)
+      .json({ message: 'Error interno al guardar resumen realtime' });
   }
 };

@@ -1,11 +1,14 @@
 // src/routes/realtimeRoutes.js
 import { Router } from 'express';
-import { getRealtimeClientSecret } from '../controllers/realtimeController.js';
-
+import {getRealtimeClientSecret,saveRealtimeSessionSummary} from '../controllers/realtimeController.js';
 
 const router = Router();
 
-// Si querés que solo usuarios logueados puedan usar voz:
+// GET /api/realtime/client-secret
 router.get('/client-secret', getRealtimeClientSecret);
+
+// POST /api/realtime/sessions
+// (la tool del agente llama acá para guardar el resumen)
+router.post('/sessions', saveRealtimeSessionSummary);
 
 export default router;
