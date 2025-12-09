@@ -23,14 +23,14 @@ export function authMiddleware(req, res, next) {
   }
 
   const token = authHeader.split(' ')[1];
-  const secret = process.env.JWT_SECRET;
+  const JWT_SECRET = process.env.JWT_SECRET;
 
-  if (!secret) {
+  if (!JWT_SECRET) {
     return res.status(500).json({ message: 'Configuración de JWT faltante' });
   }
 
   try {
-    const decoded = jwt.verify(token, secret);
+    const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
     return next();
   } catch (error) {

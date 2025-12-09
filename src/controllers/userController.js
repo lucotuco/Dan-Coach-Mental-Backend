@@ -45,14 +45,14 @@ export async function loginUser(req, res, next) {
     delete userObj.password;
 
     // 5) Generar token y devolver el usuario logueado
-    const secret = process.env.JWT_SECRET;
+    const JWT_SECRET = process.env.JWT_SECRET;
     console.log(process.env.JWT_SECRET);
 
-    if (!secret) {
+    if (!JWT_SECRET) {
       return res.status(500).json({ message: 'Falta la clave de JWT' });
     }
 
-    const token = jwt.sign({ userId: user._id }, secret, {
+    const token = jwt.sign({ userId: user._id }, JWT_SECRET, {
       expiresIn: '7d',
     });
 
