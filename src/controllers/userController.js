@@ -46,6 +46,7 @@ export async function loginUser(req, res, next) {
 
     // 5) Generar token y devolver el usuario logueado
     const secret = process.env.JWT_SECRET;
+    console.log(process.env.JWT_SECRET);
 
     if (!secret) {
       return res.status(500).json({ message: 'Falta la clave de JWT' });
