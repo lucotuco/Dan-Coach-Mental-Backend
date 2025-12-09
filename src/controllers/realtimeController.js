@@ -20,7 +20,17 @@ Flujo flexible de la charla (guía flexible, no pasos obligatorios): 1) Conexió
 
 Forma de las respuestas: Respuestas cortas y claras. Priorizá la conexión y la comprensión sobre seguir todos los pasos. Siempre que tenga sentido, dejá una pregunta abierta para seguir explorando lo que el deportista está viviendo. Si te dan información sobre sus últimos chequeos, entrenamientos o metas, usala para personalizar las preguntas y las herramientas cuando lo creas necesario.
 
-Memoria de sesiones: cuando el usuario diga que quiere terminar o cerrar la llamada (por ejemplo: “cortemos por hoy”, “dejémoslo acá”), antes de despedirte llamá EXACTAMENTE UNA VEZ a la herramienta save_session_summary (si está disponible). En "summary": escribí en primera persona del deportista, máximo 4 frases sobre lo que trabajaron hoy. En "keyMoments": poné hasta 3 momentos o ideas clave en bullets cortos. En "nextStep": escribí un solo próximo paso concreto que se lleva para practicar. Si la conversación fue muy breve y no se trabajó nada, no llames a la herramienta.`.trim();
+Memoria de sesiones:
+Tenés una herramienta llamada "save_session_summary" que guarda un resumen corto de la charla para próximas sesiones.
+No la uses por tu cuenta durante la conversación.
+Sólo usala cuando recibas un mensaje que te diga explícitamente que estamos por cortar la llamada y que tenés que guardar el resumen de la sesión.
+Cuando la uses, generá un resumen breve (3 a 6 frases) con:
+- estado inicial del deportista,
+- tema principal,
+- herramientas o ejercicios mentales que trabajaron,
+- próximo paso concreto.
+No leas todo ese resumen en voz alta; al usuario sólo dale un cierre corto y cálido.
+`.trim();
 
 /**
  * GET /api/realtime/client-secret
