@@ -6,32 +6,52 @@ export async function buildCoachContext(userId) {
   const user = await User.findById(userId).lean();
   if (!user) throw new Error('Usuario no encontrado');
 
-  // Últimos 5 chequeos (ajustá el número)
+  // Últimos 5 chequeos
   const chequeos = await Chequeo.find({ owner: userId })
     .sort({ fecha: -1 })
     .limit(5)
     .lean();
 
-const userContext = [];
+  //
+  // ---------- CONTEXTO DEL USUARIO ----------
+  //
+  const userContextParts = [];
 
-userContext.push(`Nombre: ${user.name}`);
+  userContextParts.push(`Nombre: ${user.name ?? 'Sin nombre'}`);
 
-if (user.deporte)   userContext.push(`Deporte: ${user.deporte}`);
-if (user.posicion)  userContext.push(`Posición: ${user.posicion}`);
-if (user.edad)      userContext.push(`Edad: ${user.edad}`);
-if (user.nivel)     userContext.push(`Nivel: ${user.nivel}`);
-if (user.goalT)   
-{
-  userContext.push(`Meta: ${user.goalT}`);
-}
-else userContext.push(`Meta resumen: ${user.goalA.summary} - tags: ${user.goalA.tags?.join(', ')}`)
+  if (user.deporte)  userContextParts.push(`Deporte: ${user.deporte}`);
+  if (user.posicion) userContextParts.push(`Posición: ${user.posicion}`);
+  if (user.edad)     userContextParts.push(`Edad: ${user.edad}`);
+  if (user.nivel)    userContextParts.push(`Nivel: ${user.nivel}`);
 
-    .filter(Boolean)
-    .join('\n');
+  // Meta por TEXTO
+  if (user.goalT) {
+    userContextParts.push(`Meta: ${user.goalT}`);
+  }
+  // Sino, si hay meta por AUDIO
+  else if (user.goalA) {
+    const summary = user.goalA.summary ?? '(sin resumen)';
+    const tagsArray = Array.isArray(user.goalA.tags) ? user.goalA.tags : [];
+    const tagsText =
+      tagsArray.length > 0 ? tagsArray.join(', ') : '(sin tags)';
 
+    userContextParts.push(
+      `Meta resumen: ${summary} - tags: ${tagsText}`
+    );
+  }
+
+  // Ahora sí, filtramos falsy y lo convertimos en string:
+  const userContext = userContextParts.filter(Boolean).join('\n');
+
+  //
+  // ---------- CONTEXTO DE CHEQUEOS ----------
+  //
   const chequeosContext = chequeos
     .map((ch) => {
-      const fecha = ch.fecha?.toISOString().split('T')[0];
+      const fecha = ch.fecha
+        ? new Date(ch.fecha).toISOString().split('T')[0]
+        : 'sin fecha';
+
       const vars = [
         ch.variable1 && `v1=${ch.variable1}`,
         ch.variable2 && `v2=${ch.variable2}`,
@@ -44,13 +64,29 @@ else userContext.push(`Meta resumen: ${user.goalA.summary} - tags: ${user.goalA.
         .filter(Boolean)
         .join(', ');
 
-        const contextoAudio = chequeo.audio.summary;
-        const audioTags= chequeo.audio.tags;
+      // Si tu modelo de Chequeo tiene algo como ch.audio:
+      const audioSummary = ch.audio?.summary;
+      const audioTags = Array.isArray(ch.audio?.tags)
+        ? ch.audio.tags.join(', ')
+        : undefined;
 
-      return `- ${fecha} | tipo: ${ch.tipo}${vars ? ` | ${vars}` : ''} | audio resumen:${contextoAudio} | audi tags${audioTags} `;
+      let extraPart = '';
+      if (audioSummary || audioTags) {
+        extraPart += ` | audio resumen: ${audioSummary ?? '(sin resumen)'}`;
+        if (audioTags) {
+          extraPart += ` | audio tags: ${audioTags}`;
+        }
+      }
+
+      return `- ${fecha} | tipo: ${ch.tipo}${
+        vars ? ` | ${vars}` : ''
+      }${extraPart}`;
     })
     .join('\n');
 
+  //
+  // ---------- STRING FINAL ----------
+  //
   const contextString = `
 [CONTEXTO DEL USUARIO]
 ${userContext || 'Sin datos de usuario'}
