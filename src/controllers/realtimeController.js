@@ -83,13 +83,18 @@ export const getRealtimeClientSecret = async (req, res) => {
 
             // 👉 Pedimos explícitamente audio + texto
             // (el modelo puede hablar y a la vez generar output_text / input_text)
-            modalities: ['audio', 'text'],
+            output_modalities: ['audio'],
 
             // Formatos de audio que usa el cliente Realtime (WebRTC)
             input_audio_format: 'pcm16',
             output_audio_format: 'pcm16',
 
             audio: {
+              input:{
+                transcription:{
+                  model:'whisper-1'
+                },
+              },
               output: {
                 voice: 'verse',
               },
