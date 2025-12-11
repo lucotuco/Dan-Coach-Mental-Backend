@@ -80,6 +80,15 @@ export const getRealtimeClientSecret = async (req, res) => {
             type: 'realtime',
             model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
             instructions,
+
+            // 👉 Pedimos explícitamente audio + texto
+            // (el modelo puede hablar y a la vez generar output_text / input_text)
+            modalities: ['audio', 'text'],
+
+            // Formatos de audio que usa el cliente Realtime (WebRTC)
+            input_audio_format: 'pcm16',
+            output_audio_format: 'pcm16',
+
             audio: {
               output: {
                 voice: 'verse',
@@ -122,8 +131,6 @@ export const saveRealtimeSessionSummary = async (req, res) => {
         .status(400)
         .json({ message: 'Faltan userId o summary en el body' });
     }
-
-    // opcional: podrías validar que req.user.id === userId, si tu authMiddleware lo setea
 
     const sessionDoc = await CoachSession.create({
       owner: userId,
