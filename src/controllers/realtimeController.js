@@ -88,6 +88,7 @@ export const getRealtimeClientSecret = async (req, res) => {
             audio: {
               input:{
                 transcription:{
+                  language:'es',
                   model:'whisper-1'
                 },
               },
@@ -95,6 +96,7 @@ export const getRealtimeClientSecret = async (req, res) => {
                 voice: 'verse',
               },
             },
+            include:'Include logprobs for input audio transcription.'
           },
         }),
       },
