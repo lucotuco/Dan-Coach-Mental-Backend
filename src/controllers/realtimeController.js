@@ -87,14 +87,11 @@ export const getRealtimeClientSecret = async (req, res) => {
 
             audio: {
               input:{
-                format:'PCM audio format',
-
                 transcription:{
                   model:'whisper-1'
                 },
               },
               output: {
-                format:'PCM audio format',
                 voice: 'verse',
               },
             },
