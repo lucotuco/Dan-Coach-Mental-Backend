@@ -96,7 +96,7 @@ export const getRealtimeClientSecret = async (req, res) => {
                 voice: 'verse',
               },
             },
-            include:'Include logprobs for input audio transcription.'
+            include:[item.input_audio_transcription.logprobs ,'Include logprobs for input audio transcription.']
           },
         }),
       },
