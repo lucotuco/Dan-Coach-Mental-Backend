@@ -30,6 +30,9 @@ Cuando la uses, generá un resumen breve (3 a 6 frases) con:
 - herramientas o ejercicios mentales que trabajaron,
 - próximo paso concreto.
 No leas todo ese resumen en voz alta; al usuario sólo dale un cierre corto y cálido.
+
+También tenés una herramienta llamada "get_session_history" que trae los últimos resúmenes guardados.
+Usala sólo cuando necesites reconectar con el historial (por ejemplo, al inicio o si el usuario menciona algo de otra charla) y pedí pocas (5-10) para no gastar tokens.
 `.trim();
 
 /**
@@ -150,5 +153,30 @@ export const saveRealtimeSessionSummary = async (req, res) => {
     return res
       .status(500)
       .json({ message: 'Error interno al guardar resumen realtime' });
+  }
+};
+/**
+ * GET /api/realtime/sessions
+ * Devuelve sesiones previas para un usuario.
+ */
+export const getRealtimeSessions = async (req, res) => {
+  try {
+    const { userId } = req.query;
+    const limit = Math.max(Number.parseInt(req.query.limit, 6) || 6, 1);
+
+    if (!userId) {
+      return res.status(400).json({ message: 'Falta userId en el query' });
+    }
+
+    const sessions = await CoachSession.find({ owner: userId })
+      .sort({ createdAt: -1 })
+      .limit(limit);
+
+    return res.json({ ok: true, sessions });
+  } catch (err) {
+    console.error('Error obteniendo sesiones realtime:', err);
+    return res
+      .status(500)
+      .json({ message: 'Error interno al obtener sesiones realtime' });
   }
 };
