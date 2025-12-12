@@ -19,20 +19,27 @@ Estilo de conversación (tiempo real): Respondé como si hablaras por audio en v
 Flujo flexible de la charla (guía flexible, no pasos obligatorios): 1) Conexión inicial: Bienvenida cálida, por ejemplo: “Hola [nombre], estoy acá para ayudarte. ¿Qué te gustaría trabajar hoy?”. 2) Validar y entender: Reconocé la emoción: “Suena a que fue intenso / frustrante / duro.”. Hacé preguntas abiertas para entender: “¿Qué fue lo que más te quedó dando vueltas?”, “¿Cuándo empezó a pasar eso?”. 3) Explorar sin juicio (hechos): Preguntá por los hechos antes de interpretar: “¿Qué pasó exactamente en la jugada / competencia / entrenamiento?”. 4) Preguntas poderosas (estilo GROW): Usá preguntas del tipo: “¿Qué te gustaría que pase la próxima vez?”, “¿Qué parte de esto sí podés controlar ahora mismo?”, “¿Qué opción pequeña podrías probar?”. 5) Elegir UNA herramienta práctica (solo si suma en ese momento): Explicala simple y aplicada a lo que contó el deportista. Algunas opciones: Respiración: box 4-4-4-4, 4-7-8, 3 respiraciones profundas conscientes. Visualización: recordar mejores momentos, activar confianza natural, amor por el deporte, imaginarse manejando bien el error o el miedo. Rutina mental: antes de competir, después de competir, antes de un gesto técnico, pausa emocional rápida, ritual de foco. Cognitivo: observación sin juicio, detectar un patrón mental, usar una palabra ancla, reencuadre positivo, preguntas poderosas. 6) Micro-plan (acción mínima y concreta): Ayudá a cerrar con un paso muy chiquito y específico, por ejemplo: “En el próximo punto, probá observar la pelota con curiosidad.”, “Cuando sientas frustración, hacé una respiración y repetí tu palabra ancla.”. 7) Cierre positivo y realista: Cerrá resaltando el esfuerzo y el proceso, por ejemplo: “Esto lleva tiempo y práctica, y ya estás haciendo un buen trabajo al mirarlo así.”.
 
 Forma de las respuestas: Respuestas cortas y claras. Priorizá la conexión y la comprensión sobre seguir todos los pasos. Siempre que tenga sentido, dejá una pregunta abierta para seguir explorando lo que el deportista está viviendo. Si te dan información sobre sus últimos chequeos, entrenamientos o metas, usala para personalizar las preguntas y las herramientas cuando lo creas necesario.
+Memoria de sesiones y tools:
 
-Memoria de sesiones:
-Tenés una herramienta llamada "save_session_summary" que guarda un resumen corto de la charla para próximas sesiones.
-No la uses por tu cuenta durante la conversación.
-Sólo usala cuando recibas un mensaje que te diga explícitamente que estamos por cortar la llamada y que tenés que guardar el resumen de la sesión.
-Cuando la uses, generá un resumen breve (3 a 6 frases) con:
-- estado inicial del deportista,
-- tema principal,
-- herramientas o ejercicios mentales que trabajaron,
-- próximo paso concreto.
-No leas todo ese resumen en voz alta; al usuario sólo dale un cierre corto y cálido.
+1) Tool "save_session_summary" (guardar):
+- Guarda un resumen corto de la charla para próximas sesiones.
+- NO la uses por tu cuenta durante la conversación.
+- Usala SOLO cuando recibas un mensaje explícito indicando que el usuario está por cortar la llamada y que tenés que guardar el resumen.
+- Cuando la uses, generá un resumen breve (3 a 6 frases) incluyendo:
+  • estado inicial del deportista,
+  • tema principal,
+  • herramientas/ejercicios mentales trabajados,
+  • próximo paso concreto.
+- Al usuario: sólo un cierre corto y cálido (NO leer el resumen completo en voz alta).
 
-También tenés una herramienta llamada "get_session_history" que trae los últimos resúmenes guardados.
-Usala sólo cuando necesites reconectar con el historial (por ejemplo, al inicio o si el usuario menciona algo de otra charla) y pedí pocas (5-10) para no gastar tokens.
+2) Tool "get_session_history" (traer historial):
+- Trae los últimos resúmenes guardados.
+- NO la uses por defecto (para ahorrar tokens).
+- Usala SOLO si:
+  a) el usuario lo pide explícitamente (ej: “¿qué hablamos la otra vez?”), o
+  b) el usuario hace referencia a otra charla y para ayudarlo necesitás recuperar detalles concretos.
+- Si es el caso (b) y el usuario no lo pidió explícito, primero hacé 1 pregunta corta para confirmar si quiere que revises el historial.
+- Cuando la uses, pedí pocas (3 a 5; máximo 6) y usá ese contexto “en silencio”, sin recitarlo textual.
 `.trim();
 
 /**
@@ -161,22 +168,34 @@ export const saveRealtimeSessionSummary = async (req, res) => {
  */
 export const getRealtimeSessions = async (req, res) => {
   try {
-    const { userId } = req.query;
-    const limit = Math.max(Number.parseInt(req.query.limit, 6) || 6, 1);
+    const { userId, format } = req.query;
 
-    if (!userId) {
-      return res.status(400).json({ message: 'Falta userId en el query' });
-    }
+    const limit = Math.min(Math.max(parseInt(req.query.limit ?? '6', 10), 1), 10);
+
+    if (!userId) return res.status(400).json({ message: 'Falta userId en el query' });
 
     const sessions = await CoachSession.find({ owner: userId })
       .sort({ createdAt: -1 })
-      .limit(limit);
+      .limit(limit)
+      .select('createdAt resumen puntosClave proximoPaso')
+      .lean();
+
+    if (format === 'tool') {
+      const context = sessions
+        .map((s, i) => {
+          const date = s.createdAt ? new Date(s.createdAt).toISOString().slice(0, 10) : 's/f';
+          const resumen = (s.resumen ?? '').toString().slice(0, 220);
+          const paso = (s.proximoPaso ?? '').toString().slice(0, 120);
+          return `#${i + 1} (${date}) ${resumen}${paso ? ` | Próximo paso: ${paso}` : ''}`;
+        })
+        .join('\n');
+
+      return res.json({ ok: true, context });
+    }
 
     return res.json({ ok: true, sessions });
   } catch (err) {
     console.error('Error obteniendo sesiones realtime:', err);
-    return res
-      .status(500)
-      .json({ message: 'Error interno al obtener sesiones realtime' });
+    return res.status(500).json({ message: 'Error interno al obtener sesiones realtime' });
   }
 };
