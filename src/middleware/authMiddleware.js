@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 
 const PUBLIC_ROUTES = [
   { method: 'POST', path: '/api/users/login' },
+  { method: 'POST', path: '/api/users' },
 ];
 
 function isPublicRoute(req) {
