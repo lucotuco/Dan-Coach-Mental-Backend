@@ -67,7 +67,8 @@ export async function loginUser(req, res, next) {
 
 export async function createUser(req, res, next) {
   try {
-    let { name, email, phone, password } = req.body;
+    let { name, email, phone, password } = req.body;  
+    console.log(req.body)
 
     // Normalizar valores (evitar espacios, mayúsculas en mail, etc.)
     name = name?.trim();
