@@ -67,16 +67,12 @@ export async function loginUser(req, res, next) {
 
 export async function createUser(req, res, next) {
   try {
-    let { name, email, phone, password } = req.body;  
-    console.log(req.body)
+    let { name, email, phone, password } = req.body;
 
-    // Normalizar valores (evitar espacios, mayúsculas en mail, etc.)
     name = name?.trim();
     email = email?.trim().toLowerCase();
     phone = phone?.trim();
 
-
-    // 1) Validar que no falte ningún campo
     const missingFields = [];
     if (!name) missingFields.push('name');
     if (!email) missingFields.push('email');
@@ -84,43 +80,36 @@ export async function createUser(req, res, next) {
     if (!password) missingFields.push('password');
 
     if (missingFields.length > 0) {
-      return res.status(400).json({
-        message: 'Faltan campos obligatorios',
-        missingFields, // por si querés mostrar cuáles faltan en el front
-      });
+      return res.status(400).json({ message: 'Faltan campos obligatorios', missingFields });
     }
-    /*    ACTIVAR DSP!!!!!!!!!!!!!!!!!!
 
-    if(!normalizedEmail.includes('@gmail.com')){
-         return res.status(409).json({ message: 'El email ingresado no es valido' });
-      }*/
-
-    // 2) Verificar si ya existe un usuario con ese email
     const existingUser = await User.findOne({ email });
-
     if (existingUser) {
-      // 409 = conflicto (recurso ya existe)
-      return res
-        .status(409)
-        .json({ message: 'Ya existe un usuario registrado con ese email' });
+      return res.status(409).json({ message: 'Ya existe un usuario registrado con ese email' });
     }
 
-    // 3) Crear el usuario
     const user = await User.create({ name, email, phone, password });
 
-    // Opcional: no devolver la contraseña al front
     const userObj = user.toObject();
     delete userObj.password;
 
-    return res.json({
+    const JWT_SECRET = process.env.JWT_SECRET;
+    if (!JWT_SECRET) {
+      return res.status(500).json({ message: 'Falta la clave de JWT' });
+    }
+
+    const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
+
+    return res.status(201).json({
       message: 'creacion de usuario exitoso',
       user: userObj,
+      token,
     });
   } catch (error) {
     next(error);
-    console.log
   }
-} export async function updateUser(req, res, next) {
+}
+ export async function updateUser(req, res, next) {
   try {
     const {
       id,
