@@ -7,7 +7,7 @@ import danRoutes from './routes/danRoutes.js';
 import realtimeRoutes from './routes/realtimeRoutes.js';
 import { connectToDatabase } from './config/mongo.js';
 import { authMiddleware } from './middleware/authMiddleware.js';
-import liveavatarRoutes from "./src/routes/liveavatarRoutes.js";
+import liveavatarRoutes from "./routes/liveavatarRoutes.js";
 
 dotenv.config();
 
