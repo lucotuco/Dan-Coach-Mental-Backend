@@ -67,16 +67,14 @@ export async function loginUser(req, res, next) {
 
 export async function createUser(req, res, next) {
   try {
-    let { name, email, phone, password } = req.body;
+    let { name, email, password } = req.body;
 
     name = name?.trim();
     email = email?.trim().toLowerCase();
-    phone = phone?.trim();
 
     const missingFields = [];
     if (!name) missingFields.push('name');
     if (!email) missingFields.push('email');
-    if (!phone) missingFields.push('phone');
     if (!password) missingFields.push('password');
 
     if (missingFields.length > 0) {
@@ -88,7 +86,7 @@ export async function createUser(req, res, next) {
       return res.status(409).json({ message: 'Ya existe un usuario registrado con ese email' });
     }
 
-    const user = await User.create({ name, email, phone, password });
+    const user = await User.create({ name, email, password });
 
     const userObj = user.toObject();
     delete userObj.password;
