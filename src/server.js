@@ -7,6 +7,7 @@ import danRoutes from './routes/danRoutes.js';
 import realtimeRoutes from './routes/realtimeRoutes.js';
 import { connectToDatabase } from './config/mongo.js';
 import { authMiddleware } from './middleware/authMiddleware.js';
+import liveavatarRoutes from "./src/routes/liveavatarRoutes.js";
 
 dotenv.config();
 
@@ -36,6 +37,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/chequeos', chequeoRoutes);
 app.use('/api/dan', danRoutes);
 app.use('/api/realtime', realtimeRoutes);
+app.use("/api/liveavatar", liveavatarRoutes);
 
 app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
   console.error(err);
