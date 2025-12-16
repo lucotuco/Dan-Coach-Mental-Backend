@@ -37,6 +37,7 @@ export async function createTts(req, res) {
       model,
       voice,
       input: text,
+      instructions : "Soná como una charla cercana (audio en vivo), no como sesión formal. Calmo con buena energía, empático (énfasis en empatía), cercano, respetuoso y validante. Usá “vos” (rioplatense).",
       response_format: "mp3",
     });
 
