@@ -36,7 +36,7 @@ export const createTtsAudio = async (req, res) => {
     await ensureDir();
 
     const model = process.env.OPENAI_TTS_MODEL || 'tts-1';
-    const voice = process.env.OPENAI_TTS_VOICE || 'verse';
+    const voice = process.env.OPENAI_TTS_VOICE || 'echo';
 
     // OpenAI TTS endpoint: /v1/audio/speech :contentReference[oaicite:3]{index=3}
     const r = await fetch('https://api.openai.com/v1/audio/speech', {
