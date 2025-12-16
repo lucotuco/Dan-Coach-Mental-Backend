@@ -28,7 +28,7 @@ Pasos de la sesión (GUÍA FLEXIBLE, no obligatoria ni siempre en orden):
 2) Validar y entender: reconocer emoción + 1–2 preguntas abiertas.
 3) Explorar hechos: preguntar qué pasó exactamente antes de interpretar.
 4) Preguntas poderosas (GROW): objetivo, control, opciones, próximo intento.
-5) Elegir UNA herramienta práctica (solo si suma): 
+5) Elegir UNA herramienta práctica (solo si suma):
    - Respiración: box 4-4-4-4, 4-7-8, 3 respiraciones profundas conscientes.
    - Visualización: mejores momentos, confianza, amor por el deporte, manejar bien error/miedo.
    - Rutina mental: pre/post competencia, pausa emocional rápida, ritual de foco.
@@ -56,12 +56,15 @@ Memoria de sesiones y tools:
 - Usala SOLO si: (a) el usuario lo pide, o (b) el usuario refiere otra charla y necesitás detalles.
 - Caso (b) sin pedido explícito: primero 1 pregunta corta confirmando si quiere que revises historial.
 - Cuando la uses: pedí 3–5 (máximo 6) y usá el contexto en silencio, sin recitarlo textual.
-
 `.trim();
 
 /**
  * GET /api/realtime/client-secret
  * Devuelve un client_secret efímero para que el front se conecte por WebRTC.
+ *
+ * ✅ NUEVO:
+ * - Si mandás ?did=1 => el modelo responde SOLO TEXTO (para que la voz la haga OpenAI TTS y el video D-ID)
+ * - Si NO mandás did => responde AUDIO como venías usando (ideal para mobile o audio-only)
  */
 export const getRealtimeClientSecret = async (req, res) => {
   try {
@@ -73,8 +76,13 @@ export const getRealtimeClientSecret = async (req, res) => {
     }
 
     const userId = req.query.userId;
+
+    // ✅ NUEVO: switch de modo (web con D-ID)
+    const didParam = String(req.query.did ?? '').toLowerCase();
+    const useDidMode = didParam === '1' || didParam === 'true';
+
     let extraContext = '';
-    console.log('userId backend:', userId);
+    console.log('userId backend:', userId, 'useDidMode:', useDidMode);
 
     if (userId) {
       try {
@@ -85,49 +93,57 @@ export const getRealtimeClientSecret = async (req, res) => {
       }
     }
 
-    console.log('extra context: ', extraContext);
-
     const instructions =
-      DAN_BASE_INSTRUCTIONS + (extraContext ? `\n\n${extraContext}` : '');
+      DAN_BASE_INSTRUCTIONS +
+      (extraContext ? `\n\n${extraContext}` : '') +
+      // ✅ NUEVO: regla extra SOLO cuando useDidMode
+      (useDidMode
+        ? `\n\nIMPORTANTE (modo video externo): Respondé SOLO en TEXTO. No generes salida de audio en OpenAI. Tu texto será convertido a voz por otra capa (TTS) y usado para lip-sync.`
+        : '');
 
-    const response = await fetch(
-      'https://api.openai.com/v1/realtime/client_secrets',
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          expires_after: {
-            anchor: 'created_at',
-            seconds: 600,
+    // ✅ MODIFICAR: output_modalities y audio.output dependen del modo
+    const sessionPayload = {
+      type: 'realtime',
+      model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
+      instructions,
+
+      // Si useDidMode => texto (vos lo transformás a TTS y lo mandás a D-ID)
+      // Si no => audio como ya venías
+      output_modalities: useDidMode ? ['text'] : ['audio'],
+
+      audio: {
+        input: {
+          transcription: {
+            language: 'es',
+            model: 'whisper-1',
           },
-          session: {
-            type: 'realtime',
-            model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
-            instructions,
+        },
 
-            // 👉 Pedimos explícitamente audio + texto
-            // (el modelo puede hablar y a la vez generar output_text / input_text)
-            output_modalities: ['audio'],
-
-            audio: {
-              input:{
-                transcription:{
-                  language:'es',
-                  model:'whisper-1'
-                },
-              },
+        // ✅ MODIFICAR: solo setear voz si efectivamente pedís audio output
+        ...(useDidMode
+          ? {}
+          : {
               output: {
                 voice: 'verse',
               },
-            },
-            
-          },
-        }),
+            }),
       },
-    );
+    };
+
+    const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        expires_after: {
+          anchor: 'created_at',
+          seconds: 600,
+        },
+        session: sessionPayload,
+      }),
+    });
 
     if (!response.ok) {
       const text = await response.text();
@@ -179,6 +195,7 @@ export const saveRealtimeSessionSummary = async (req, res) => {
       .json({ message: 'Error interno al guardar resumen realtime' });
   }
 };
+
 /**
  * GET /api/realtime/sessions
  * Devuelve sesiones previas para un usuario.

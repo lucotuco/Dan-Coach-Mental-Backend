@@ -7,6 +7,9 @@ import danRoutes from './routes/danRoutes.js';
 import realtimeRoutes from './routes/realtimeRoutes.js';
 import { connectToDatabase } from './config/mongo.js';
 import { authMiddleware } from './middleware/authMiddleware.js';
+import didRoutes from "./routes/didRoutes.js";
+import ttsRoutes from "./routes/ttsRoutes.js";
+
 
 
 dotenv.config();
@@ -37,6 +40,8 @@ app.use('/api/users', userRoutes);
 app.use('/api/chequeos', chequeoRoutes);
 app.use('/api/dan', danRoutes);
 app.use('/api/realtime', realtimeRoutes);
+app.use("/api/did", didRoutes);
+app.use("/api/tts", ttsRoutes);
 
 
 app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
