@@ -1,33 +1,31 @@
 import jwt from 'jsonwebtoken';
 
-const PUBLIC_ROUTES = [
+const PUBLIC_ROUTES_EXACT = [
   { method: 'POST', path: '/api/users/login' },
   { method: 'POST', path: '/api/users' },
-
-  // ✅ NUEVO: salud pública
-  { method: 'GET', path: '/health' },
 ];
 
-// ✅ NUEVO: permitir MP3 público para que D-ID lo pueda descargar
-function isPublicTtsMp3(req) {
-  // req.path NO incluye querystring
-  const p = req.path || '';
-  return (
-    (req.method === 'GET' || req.method === 'HEAD') &&
-    p.startsWith('/api/tts/') &&
-    p.endsWith('.mp3')
-  );
-}
+// Prefix routes (para paths con params)
+const PUBLIC_ROUTES_PREFIX = [
+  // ✅ D-ID tiene que poder descargar /api/tts/<id>.mp3 sin JWT
+  { method: 'GET', prefix: '/api/tts/' },
+  { method: 'HEAD', prefix: '/api/tts/' },
+];
 
 function isPublicRoute(req) {
   const requestPath = req.path;
 
-  // ✅ NUEVO: caso especial MP3 público
-  if (isPublicTtsMp3(req)) return true;
-
-  return PUBLIC_ROUTES.some(
+  const exact = PUBLIC_ROUTES_EXACT.some(
     (route) => route.method === req.method && route.path === requestPath,
   );
+  if (exact) return true;
+
+  const pref = PUBLIC_ROUTES_PREFIX.some(
+    (route) =>
+      route.method === req.method &&
+      requestPath.startsWith(route.prefix),
+  );
+  return pref;
 }
 
 export function authMiddleware(req, res, next) {

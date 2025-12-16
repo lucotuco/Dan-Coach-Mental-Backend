@@ -60,30 +60,18 @@ Memoria de sesiones y tools:
 
 /**
  * GET /api/realtime/client-secret
- * Devuelve un client_secret efímero para que el front se conecte por WebRTC.
- *
- * ✅ NUEVO:
- * - Si mandás ?did=1 => el modelo responde SOLO TEXTO (para que la voz la haga OpenAI TTS y el video D-ID)
- * - Si NO mandás did => responde AUDIO como venías usando (ideal para mobile o audio-only)
  */
 export const getRealtimeClientSecret = async (req, res) => {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      return res
-        .status(500)
-        .json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
+      return res.status(500).json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
     }
 
     const userId = req.query.userId;
-
-    // ✅ NUEVO: switch de modo (web con D-ID)
-    const didParam = String(req.query.did ?? '').toLowerCase();
-    const useDidMode = didParam === '1' || didParam === 'true';
+    const didMode = String(req.query.did ?? '') === '1'; // ✅
 
     let extraContext = '';
-    console.log('userId backend:', userId, 'useDidMode:', useDidMode);
-
     if (userId) {
       try {
         extraContext = await buildCoachContext(userId);
@@ -93,24 +81,16 @@ export const getRealtimeClientSecret = async (req, res) => {
       }
     }
 
-    const instructions =
-      DAN_BASE_INSTRUCTIONS +
-      (extraContext ? `\n\n${extraContext}` : '') +
-      // ✅ NUEVO: regla extra SOLO cuando useDidMode
-      (useDidMode
-        ? `\n\nIMPORTANTE (modo video externo): Respondé SOLO en TEXTO. No generes salida de audio en OpenAI. Tu texto será convertido a voz por otra capa (TTS) y usado para lip-sync.`
-        : '');
+    const instructions = DAN_BASE_INSTRUCTIONS + (extraContext ? `\n\n${extraContext}` : '');
 
-    // ✅ MODIFICAR: output_modalities y audio.output dependen del modo
-    const sessionPayload = {
+    // Si did=1: output solo texto (vos haces TTS aparte y D-ID lipsync)
+    const output_modalities = didMode ? ['text'] : ['audio'];
+
+    const sessionConfig = {
       type: 'realtime',
       model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
       instructions,
-
-      // Si useDidMode => texto (vos lo transformás a TTS y lo mandás a D-ID)
-      // Si no => audio como ya venías
-      output_modalities: useDidMode ? ['text'] : ['audio'],
-
+      output_modalities,
       audio: {
         input: {
           transcription: {
@@ -118,14 +98,11 @@ export const getRealtimeClientSecret = async (req, res) => {
             model: 'whisper-1',
           },
         },
-
-        // ✅ MODIFICAR: solo setear voz si efectivamente pedís audio output
-        ...(useDidMode
+        // Solo si no estás en didMode (audio directo del modelo)
+        ...(didMode
           ? {}
           : {
-              output: {
-                voice: 'verse',
-              },
+              output: { voice: 'verse' },
             }),
       },
     };
@@ -137,11 +114,8 @@ export const getRealtimeClientSecret = async (req, res) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        expires_after: {
-          anchor: 'created_at',
-          seconds: 600,
-        },
-        session: sessionPayload,
+        expires_after: { anchor: 'created_at', seconds: 600 },
+        session: sessionConfig,
       }),
     });
 
@@ -158,24 +132,19 @@ export const getRealtimeClientSecret = async (req, res) => {
     return res.json(clientSecret);
   } catch (err) {
     console.error('Error en getRealtimeClientSecret:', err);
-    return res
-      .status(500)
-      .json({ error: 'Error interno al generar el client_secret' });
+    return res.status(500).json({ error: 'Error interno al generar el client_secret' });
   }
 };
 
 /**
  * POST /api/realtime/sessions
- * La tool del agente llama a este endpoint para guardar el resumen de la sesión.
  */
 export const saveRealtimeSessionSummary = async (req, res) => {
   try {
     const { userId, summary, keyMoments, nextStep, model } = req.body;
 
     if (!userId || !summary) {
-      return res
-        .status(400)
-        .json({ message: 'Faltan userId o summary en el body' });
+      return res.status(400).json({ message: 'Faltan userId o summary en el body' });
     }
 
     const sessionDoc = await CoachSession.create({
@@ -190,20 +159,16 @@ export const saveRealtimeSessionSummary = async (req, res) => {
     return res.status(201).json({ ok: true, session: sessionDoc });
   } catch (err) {
     console.error('Error guardando resumen realtime:', err);
-    return res
-      .status(500)
-      .json({ message: 'Error interno al guardar resumen realtime' });
+    return res.status(500).json({ message: 'Error interno al guardar resumen realtime' });
   }
 };
 
 /**
  * GET /api/realtime/sessions
- * Devuelve sesiones previas para un usuario.
  */
 export const getRealtimeSessions = async (req, res) => {
   try {
     const { userId, format } = req.query;
-
     const limit = Math.min(Math.max(parseInt(req.query.limit ?? '6', 10), 1), 10);
 
     if (!userId) return res.status(400).json({ message: 'Falta userId en el query' });

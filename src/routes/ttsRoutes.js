@@ -1,14 +1,13 @@
 // src/routes/ttsRoutes.js
-import { Router } from "express";
-import { createTts, getTtsFile } from "../controllers/ttsController.js";
+import { Router } from 'express';
+import { createTtsAudio, serveTtsAudio } from '../controllers/ttsController.js';
 
 const router = Router();
 
-// POST podés protegerlo con JWT si querés:
-// router.post("/", requireAuth, createTts);
-router.post("/", createTts);
+// Protegido (requiere Bearer): generar mp3
+router.post('/', createTtsAudio);
 
-// GET NO lo protejas con JWT: D-ID necesita bajarlo.
-router.get("/:id.mp3", getTtsFile);
+// Público (sin Bearer): servir mp3 para D-ID
+router.get('/:file', serveTtsAudio);
 
 export default router;

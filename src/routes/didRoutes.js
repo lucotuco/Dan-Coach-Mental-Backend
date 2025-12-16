@@ -1,13 +1,10 @@
 // src/routes/didRoutes.js
-import { Router } from "express";
-import { getDidConfig, getDidCredits } from "../controllers/didController.js";
+import { Router } from 'express';
+import { getDidConfig } from '../controllers/didController.js';
 
 const router = Router();
 
-// Opcional: si querés protegerlo con JWT, aplicá tu middleware acá.
-// router.use(requireAuth);
-
-router.get("/config", getDidConfig);
-router.get("/credits", getDidCredits);
+// Protegido por tu authMiddleware global
+router.get('/config', getDidConfig);
 
 export default router;

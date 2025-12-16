@@ -1,77 +1,102 @@
 // src/controllers/ttsController.js
-import fs from "fs";
-import path from "path";
-import crypto from "crypto";
-import OpenAI from "openai";
+import fs from 'fs/promises';
+import path from 'path';
+import { randomUUID } from 'crypto';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const TTS_DIR = path.join(process.cwd(), 'storage', 'tts');
 
-const TTS_DIR = path.resolve(process.cwd(), "tmp_tts");
-if (!fs.existsSync(TTS_DIR)) fs.mkdirSync(TTS_DIR, { recursive: true });
+async function ensureDir() {
+  await fs.mkdir(TTS_DIR, { recursive: true });
+}
 
-// Borra archivos viejos (MVP). Ajustá si querés.
-const DELETE_AFTER_MS = 10 * 60 * 1000; // 10 min
+function getPublicBaseUrl(req) {
+  // IMPORTANTE: para lip-sync D-ID, esto debe ser accesible públicamente (https)
+  // Ej: https://xxxxx.ngrok-free.app  o tu dominio de producción
+  const envBase = process.env.PUBLIC_BASE_URL;
+  if (envBase) return envBase.replace(/\/+$/, '');
 
-export async function createTts(req, res) {
+  // Fallback (sirve solo si estás deployado o con túnel)
+  const proto = req.headers['x-forwarded-proto'] || req.protocol;
+  return `${proto}://${req.get('host')}`;
+}
+
+/**
+ * POST /api/tts
+ * Body: { text: string }
+ * Devuelve: { audioUrl: string }
+ */
+export const createTtsAudio = async (req, res) => {
   try {
-    const { text } = req.body ?? {};
-    if (!text || typeof text !== "string") {
-      return res.status(400).json({ error: "Missing 'text' (string)" });
-    }
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'OPENAI_API_KEY faltante' });
 
-    const model = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
-    const voice = process.env.OPENAI_TTS_VOICE || "verse";
-    const publicBase = process.env.PUBLIC_BASE_URL;
+    const text = (req.body?.text ?? '').toString().trim();
+    if (!text) return res.status(400).json({ error: 'Falta text' });
 
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ error: "Missing OPENAI_API_KEY in .env" });
-    }
-    if (!publicBase) {
-      return res.status(500).json({
-        error:
-          "Missing PUBLIC_BASE_URL in .env (must be publicly reachable for D-ID)",
-      });
-    }
+    await ensureDir();
 
-    const mp3 = await openai.audio.speech.create({
-      model,
-      voice,
-      input: text,
-      instructions : `Sos DAN, un hombre,  coach mental deportivo virtual. Tu meta: ayudar a deportistas a ganar calma, foco y mentalidad de crecimiento usando preguntas, respiración, visualización y pequeños planes de acción.
+    const model = process.env.OPENAI_TTS_MODEL || 'tts-1';
+    const voice = process.env.OPENAI_TTS_VOICE || 'verse';
 
-Identidad y límites: Sos coach mental, guía calmo, facilitador, entrenador de hábitos y observador sin juicio. NO sos psicólogo, psiquiatra, médico, terapeuta, preparador físico, entrenador técnico ni gurú. No des diagnósticos. No des consejos médicos ni sobre medicación. No enseñes técnica deportiva (cómo golpear, correr, correr, etc.): enfocáte en mente, foco y hábitos.
-
-Tono y lenguaje: Soná como una charla cercana (audio en vivo), no como sesión formal. Calmo con buena energía, empático (énfasis en empatía), cercano, respetuoso y validante. Nunca juzgar, sermonear, retar, minimizar ni comparar negativamente. Usá “vos” (rioplatense). Palabras simples, metáforas sencillas, sin tecnicismos. Humor liviano solo si alivia, nunca para minimizar lo que siente.
-
-Forma de respuestas: cortas y claras. Priorizá conexión y comprensión sobre completar pasos. Si te dan info de últimos chequeos, entrenamientos o metas, usala para personalizar preguntas y herramientas cuando lo creas necesario.
-`,
-      response_format: "mp3",
+    // OpenAI TTS endpoint: /v1/audio/speech :contentReference[oaicite:3]{index=3}
+    const r = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        voice,
+        input: text,
+        format: 'mp3',
+      }),
     });
 
-    const id = crypto.randomUUID();
-    const filePath = path.join(TTS_DIR, `${id}.mp3`);
-    const buffer = Buffer.from(await mp3.arrayBuffer());
-    await fs.promises.writeFile(filePath, buffer);
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      console.error('OpenAI TTS error:', t);
+      return res.status(500).json({ error: 'OpenAI TTS falló', details: t });
+    }
 
-    // Cleanup (MVP)
-    setTimeout(() => {
-      fs.promises.unlink(filePath).catch(() => {});
-    }, DELETE_AFTER_MS);
+    const arrayBuf = await r.arrayBuffer();
+    const buf = Buffer.from(arrayBuf);
 
-    const audioUrl = `${publicBase}/api/tts/${id}.mp3`;
-    return res.json({ id, audioUrl });
-  } catch (e) {
-    return res.status(500).json({ error: "TTS failed", details: String(e) });
+    const fileName = `${randomUUID()}.mp3`;
+    const filePath = path.join(TTS_DIR, fileName);
+    await fs.writeFile(filePath, buf);
+
+    const base = getPublicBaseUrl(req);
+    const audioUrl = `${base}/api/tts/${fileName}`;
+
+    return res.json({ audioUrl });
+  } catch (err) {
+    console.error('createTtsAudio error:', err);
+    return res.status(500).json({ error: 'Error interno creando TTS' });
   }
-}
+};
 
-export async function getTtsFile(req, res) {
-  const { id } = req.params;
-  const filePath = path.join(TTS_DIR, `${id}.mp3`);
+/**
+ * GET /api/tts/:file
+ * Público (sin auth) para que D-ID pueda descargar el mp3.
+ */
+export const serveTtsAudio = async (req, res) => {
+  try {
+    const file = (req.params.file ?? '').toString();
+    const safe = path.basename(file);
 
-  if (!fs.existsSync(filePath)) return res.status(404).end();
+    if (!safe.endsWith('.mp3')) {
+      return res.status(400).json({ error: 'Formato inválido' });
+    }
 
-  res.setHeader("Content-Type", "audio/mpeg");
-  // Importante: este GET debe ser público porque D-ID lo va a descargar server-side.
-  fs.createReadStream(filePath).pipe(res);
-}
+    const filePath = path.join(TTS_DIR, safe);
+
+    // Opcional: CORS explícito para debug en browser
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    return res.sendFile(filePath);
+  } catch (err) {
+    console.error('serveTtsAudio error:', err);
+    return res.status(404).send('Not found');
+  }
+};
