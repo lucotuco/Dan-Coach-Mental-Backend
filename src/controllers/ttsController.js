@@ -5,25 +5,29 @@ import { randomUUID } from 'crypto';
 
 const TTS_DIR = path.join(process.cwd(), 'storage', 'tts');
 
+const ALLOWED_VOICES = new Set([
+  'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer', 'verse',
+]);
+
+const ALLOWED_MODELS = new Set(['tts-1', 'tts-1-hd', 'gpt-4o-mini-tts']);
+
 async function ensureDir() {
   await fs.mkdir(TTS_DIR, { recursive: true });
 }
 
 function getPublicBaseUrl(req) {
-  // IMPORTANTE: para lip-sync D-ID, esto debe ser accesible públicamente (https)
-  // Ej: https://xxxxx.ngrok-free.app  o tu dominio de producción
+  // >>> CLAVE para D-ID: tiene que ser accesible desde internet (https), NO localhost
   const envBase = process.env.PUBLIC_BASE_URL;
   if (envBase) return envBase.replace(/\/+$/, '');
 
-  // Fallback (sirve solo si estás deployado o con túnel)
   const proto = req.headers['x-forwarded-proto'] || req.protocol;
   return `${proto}://${req.get('host')}`;
 }
 
 /**
  * POST /api/tts
- * Body: { text: string }
- * Devuelve: { audioUrl: string }
+ * Body: { text, model?, voice?, instructions?, speed? }
+ * Devuelve: { audioUrl }
  */
 export const createTtsAudio = async (req, res) => {
   try {
@@ -35,22 +39,45 @@ export const createTtsAudio = async (req, res) => {
 
     await ensureDir();
 
-    const model = process.env.OPENAI_TTS_MODEL || 'tts-1';
-    const voice = process.env.OPENAI_TTS_VOICE || 'echo';
+    const bodyModel = (req.body?.model ?? '').toString().trim();
+    const bodyVoice = (req.body?.voice ?? '').toString().trim();
+    const bodyInstructions = (req.body?.instructions ?? '').toString().trim();
+    const bodySpeedRaw = req.body?.speed;
 
-    // OpenAI TTS endpoint: /v1/audio/speech :contentReference[oaicite:3]{index=3}
+    const model = ALLOWED_MODELS.has(bodyModel)
+      ? bodyModel
+      : (process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts');
+
+    const voice = ALLOWED_VOICES.has(bodyVoice)
+      ? bodyVoice
+      : (process.env.OPENAI_TTS_VOICE || 'verse');
+
+    let speed = 1.0;
+    if (typeof bodySpeedRaw === 'number') speed = bodySpeedRaw;
+    if (typeof bodySpeedRaw === 'string' && bodySpeedRaw) speed = Number(bodySpeedRaw);
+    if (!Number.isFinite(speed)) speed = 1.0;
+    speed = Math.max(0.25, Math.min(4.0, speed));
+
+    // Si querés “prompt de voz” estable, ponelo en env y/o mandalo desde el front
+    const instructions =
+      bodyInstructions || (process.env.OPENAI_TTS_INSTRUCTIONS || '').toString().trim();
+
+    const payload = {
+      model,
+      voice,
+      input: text,
+      response_format: 'mp3',
+      speed,
+      ...(instructions && model === 'gpt-4o-mini-tts' ? { instructions } : {}),
+    };
+
     const r = await fetch('https://api.openai.com/v1/audio/speech', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        model,
-        voice,
-        input: text,
-        format: 'mp3',
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!r.ok) {
@@ -78,7 +105,7 @@ export const createTtsAudio = async (req, res) => {
 
 /**
  * GET /api/tts/:file
- * Público (sin auth) para que D-ID pueda descargar el mp3.
+ * Público para D-ID.
  */
 export const serveTtsAudio = async (req, res) => {
   try {
@@ -91,7 +118,7 @@ export const serveTtsAudio = async (req, res) => {
 
     const filePath = path.join(TTS_DIR, safe);
 
-    // Opcional: CORS explícito para debug en browser
+    // CORS abierto (útil para debug; D-ID server-to-server no lo necesita)
     res.setHeader('Access-Control-Allow-Origin', '*');
 
     return res.sendFile(filePath);

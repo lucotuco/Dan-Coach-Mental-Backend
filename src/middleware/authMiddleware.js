@@ -1,40 +1,33 @@
+// src/middleware/authMiddleware.js
 import jwt from 'jsonwebtoken';
 
-const PUBLIC_ROUTES_EXACT = [
+const PUBLIC_ROUTES = [
   { method: 'POST', path: '/api/users/login' },
   { method: 'POST', path: '/api/users' },
-];
 
-// Prefix routes (para paths con params)
-const PUBLIC_ROUTES_PREFIX = [
-  // ✅ D-ID tiene que poder descargar /api/tts/<id>.mp3 sin JWT
+  // >>> Público para que D-ID pueda bajar el mp3
+  // Matcheamos por prefijo porque el archivo cambia (uuid.mp3)
   { method: 'GET', prefix: '/api/tts/' },
-  { method: 'HEAD', prefix: '/api/tts/' },
+
+  // opcional
+  { method: 'GET', path: '/health' },
 ];
 
 function isPublicRoute(req) {
   const requestPath = req.path;
 
-  const exact = PUBLIC_ROUTES_EXACT.some(
-    (route) => route.method === req.method && route.path === requestPath,
-  );
-  if (exact) return true;
-
-  const pref = PUBLIC_ROUTES_PREFIX.some(
-    (route) =>
-      route.method === req.method &&
-      requestPath.startsWith(route.prefix),
-  );
-  return pref;
+  return PUBLIC_ROUTES.some((route) => {
+    if (route.method !== req.method) return false;
+    if (route.path) return route.path === requestPath;
+    if (route.prefix) return requestPath.startsWith(route.prefix);
+    return false;
+  });
 }
 
 export function authMiddleware(req, res, next) {
-  if (isPublicRoute(req)) {
-    return next();
-  }
+  if (isPublicRoute(req)) return next();
 
   const authHeader = req.headers.authorization;
-
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ message: 'Token de autorización faltante' });
   }
