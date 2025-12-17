@@ -28,7 +28,7 @@ Pasos de la sesión (GUÍA FLEXIBLE, no obligatoria ni siempre en orden):
 2) Validar y entender: reconocer emoción + 1–2 preguntas abiertas.
 3) Explorar hechos: preguntar qué pasó exactamente antes de interpretar.
 4) Preguntas poderosas (GROW): objetivo, control, opciones, próximo intento.
-5) Elegir UNA herramienta práctica (solo si suma): 
+5) Elegir UNA herramienta práctica (solo si suma):
    - Respiración: box 4-4-4-4, 4-7-8, 3 respiraciones profundas conscientes.
    - Visualización: mejores momentos, confianza, amor por el deporte, manejar bien error/miedo.
    - Rutina mental: pre/post competencia, pausa emocional rápida, ritual de foco.
@@ -44,10 +44,9 @@ Regla de variación por sesión:
 Forma de respuestas: cortas y claras. Priorizá conexión y comprensión sobre completar pasos. Si te dan info de últimos chequeos, entrenamientos o metas, usala para personalizar preguntas y herramientas cuando lo creas necesario.
 
 Memoria de sesiones y tools:
-
 1) Tool "save_session_summary" (guardar):
 - NO la uses por tu cuenta durante la conversación.
-- Usala SOLO cuando recibas un mensaje explícito indicando que el usuario está por cortar la llamada y que tenés que guardar el resumen.
+- Usala SOLO cuando recibas un mensaje explícito indicando que el usuario está por cortar la llamada ahora mismo.
 - Resumen breve (3–6 frases): estado inicial, tema principal, herramientas trabajadas, próximo paso concreto.
 - Al usuario: sólo un cierre corto y cálido (NO leer el resumen completo).
 
@@ -60,54 +59,26 @@ Memoria de sesiones y tools:
 
 /**
  * GET /api/realtime/client-secret
- * Devuelve un client_secret efímero para que el front se conecte por WebRTC.
  */
 export const getRealtimeClientSecret = async (req, res) => {
   try {
-    const apiKey = process.env.OPENAI_API_KEY; // <<< CONFIGURAR EN ENV
+    const apiKey = process.env.OPENAI_API_KEY; // <-- TU OPENAI API KEY (server-side)
     if (!apiKey) {
       return res.status(500).json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
     }
 
     const userId = req.query.userId;
-    const voiceMode = (req.query.voiceMode || '').toString(); // "tts" => NO audio de realtime
-
     let extraContext = '';
+
     if (userId) {
       try {
         extraContext = await buildCoachContext(userId);
       } catch (err) {
         console.error('Error armando contexto de coach:', err);
-        extraContext = '';
       }
     }
 
     const instructions = DAN_BASE_INSTRUCTIONS + (extraContext ? `\n\n${extraContext}` : '');
-
-    // IMPORTANTE:
-    // - voiceMode === "tts": el modelo NO emite audio (solo texto)
-    // - en el front, el audio lo emite D-ID con TTS
-    const session = {
-      type: 'realtime',
-      model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime', // <<< OPCIONAL EN ENV
-      instructions,
-
-      output_modalities: voiceMode === 'tts' ? ['text'] : ['audio'],
-
-      audio: {
-        input: {
-          transcription: {
-            language: 'es',
-            model: 'whisper-1',
-          },
-        },
-        ...(voiceMode === 'tts'
-          ? {}
-          : {
-              output: { voice: 'verse' },
-            }),
-      },
-    };
 
     const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
       method: 'POST',
@@ -117,7 +88,24 @@ export const getRealtimeClientSecret = async (req, res) => {
       },
       body: JSON.stringify({
         expires_after: { anchor: 'created_at', seconds: 600 },
-        session,
+        session: {
+          type: 'realtime',
+          model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
+          instructions,
+
+          // CLAVE: solo texto. (El audio lo vas a generar vos con TTS y se lo pasás a D-ID)
+          output_modalities: ['text'],
+
+          // Mantenemos transcripción de lo que dice el usuario (audio in)
+          audio: {
+            input: {
+              transcription: {
+                language: 'es',
+                model: 'whisper-1',
+              },
+            },
+          },
+        },
       }),
     });
 
@@ -140,7 +128,6 @@ export const getRealtimeClientSecret = async (req, res) => {
 
 /**
  * POST /api/realtime/sessions
- * La tool del agente llama a este endpoint para guardar el resumen de la sesión.
  */
 export const saveRealtimeSessionSummary = async (req, res) => {
   try {
@@ -168,7 +155,6 @@ export const saveRealtimeSessionSummary = async (req, res) => {
 
 /**
  * GET /api/realtime/sessions
- * Devuelve sesiones previas para un usuario.
  */
 export const getRealtimeSessions = async (req, res) => {
   try {
