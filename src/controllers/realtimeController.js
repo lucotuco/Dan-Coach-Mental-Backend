@@ -132,7 +132,7 @@ export const getRealtimeClientSecret = async (req, res) => {
           model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
 
           // >>> CLAVE: solo texto (evita doble audio con D-ID)
-          output_modalities: ['text'],
+          output_modalities: ['audio'],
 
           instructions,
 
