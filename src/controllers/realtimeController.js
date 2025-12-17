@@ -28,7 +28,7 @@ Pasos de la sesión (GUÍA FLEXIBLE, no obligatoria ni siempre en orden):
 2) Validar y entender: reconocer emoción + 1–2 preguntas abiertas.
 3) Explorar hechos: preguntar qué pasó exactamente antes de interpretar.
 4) Preguntas poderosas (GROW): objetivo, control, opciones, próximo intento.
-5) Elegir UNA herramienta práctica (solo si suma):
+5) Elegir UNA herramienta práctica (solo si suma): 
    - Respiración: box 4-4-4-4, 4-7-8, 3 respiraciones profundas conscientes.
    - Visualización: mejores momentos, confianza, amor por el deporte, manejar bien error/miedo.
    - Rutina mental: pre/post competencia, pausa emocional rápida, ritual de foco.
@@ -60,16 +60,17 @@ Memoria de sesiones y tools:
 
 /**
  * GET /api/realtime/client-secret
+ * Devuelve un client_secret efímero para que el front se conecte por WebRTC.
  */
 export const getRealtimeClientSecret = async (req, res) => {
   try {
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = process.env.OPENAI_API_KEY; // <<< CONFIGURAR EN ENV
     if (!apiKey) {
       return res.status(500).json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
     }
 
     const userId = req.query.userId;
-    const didMode = String(req.query.did ?? '') === '1'; // ✅
+    const voiceMode = (req.query.voiceMode || '').toString(); // "tts" => NO audio de realtime
 
     let extraContext = '';
     if (userId) {
@@ -83,14 +84,16 @@ export const getRealtimeClientSecret = async (req, res) => {
 
     const instructions = DAN_BASE_INSTRUCTIONS + (extraContext ? `\n\n${extraContext}` : '');
 
-    // Si did=1: output solo texto (vos haces TTS aparte y D-ID lipsync)
-    const output_modalities = didMode ? ['text'] : ['audio'];
-
-    const sessionConfig = {
+    // IMPORTANTE:
+    // - voiceMode === "tts": el modelo NO emite audio (solo texto)
+    // - en el front, el audio lo emite D-ID con TTS
+    const session = {
       type: 'realtime',
-      model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
+      model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime', // <<< OPCIONAL EN ENV
       instructions,
-      output_modalities,
+
+      output_modalities: voiceMode === 'tts' ? ['text'] : ['audio'],
+
       audio: {
         input: {
           transcription: {
@@ -98,8 +101,7 @@ export const getRealtimeClientSecret = async (req, res) => {
             model: 'whisper-1',
           },
         },
-        // Solo si no estás en didMode (audio directo del modelo)
-        ...(didMode
+        ...(voiceMode === 'tts'
           ? {}
           : {
               output: { voice: 'verse' },
@@ -115,7 +117,7 @@ export const getRealtimeClientSecret = async (req, res) => {
       },
       body: JSON.stringify({
         expires_after: { anchor: 'created_at', seconds: 600 },
-        session: sessionConfig,
+        session,
       }),
     });
 
@@ -138,6 +140,7 @@ export const getRealtimeClientSecret = async (req, res) => {
 
 /**
  * POST /api/realtime/sessions
+ * La tool del agente llama a este endpoint para guardar el resumen de la sesión.
  */
 export const saveRealtimeSessionSummary = async (req, res) => {
   try {
@@ -165,6 +168,7 @@ export const saveRealtimeSessionSummary = async (req, res) => {
 
 /**
  * GET /api/realtime/sessions
+ * Devuelve sesiones previas para un usuario.
  */
 export const getRealtimeSessions = async (req, res) => {
   try {
