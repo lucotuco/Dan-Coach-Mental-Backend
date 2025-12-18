@@ -135,14 +135,15 @@ export const serveTtsAudio = async (req, res) => {
     const file = (req.params.file ?? '').toString();
     const safe = path.basename(file);
 
-    if (!safe.endsWith('.mp3')) {
+    const ext = safe.split('.').pop()?.toLowerCase();
+    if (!ext || !['mp3', 'wav'].includes(ext)) {
       return res.status(400).json({ error: 'Formato inválido' });
     }
 
     const filePath = path.join(TTS_DIR, safe);
 
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('Content-Type', ext === 'wav' ? 'audio/wav' : 'audio/mpeg');
 
     return res.sendFile(filePath);
   } catch (err) {
@@ -150,3 +151,49 @@ export const serveTtsAudio = async (req, res) => {
     return res.status(404).send('Not found');
   }
 };
+
+// +++ NUEVO: subir audio ya generado (por Realtime) y devolver audioUrl público
+const ALLOWED_UPLOAD_EXT = new Set(['wav', 'mp3']);
+
+function contentTypeFromExt(ext) {
+  if (ext === 'wav') return 'audio/wav';
+  if (ext === 'mp3') return 'audio/mpeg';
+  return 'application/octet-stream';
+}
+
+/**
+ * POST /api/tts/upload
+ * Body: { audioBase64: string, ext?: "wav"|"mp3" }
+ * Devuelve: { audioUrl }
+ */
+export const uploadAudio = async (req, res) => {
+  try {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'OPENAI_API_KEY faltante' });
+
+    const audioBase64 = (req.body?.audioBase64 ?? '').toString().trim();
+    const ext = ((req.body?.ext ?? 'wav').toString().trim().toLowerCase());
+
+    if (!audioBase64) return res.status(400).json({ error: 'Falta audioBase64' });
+    if (!ALLOWED_UPLOAD_EXT.has(ext)) return res.status(400).json({ error: 'ext inválida' });
+
+    await ensureDir();
+
+    // base64 -> bytes
+    const buf = Buffer.from(audioBase64, 'base64');
+    if (!buf?.length) return res.status(400).json({ error: 'audioBase64 inválido' });
+
+    const fileName = `${randomUUID()}.${ext}`;
+    const filePath = path.join(TTS_DIR, fileName);
+    await fs.writeFile(filePath, buf);
+
+    const base = getPublicBaseUrl(req);
+    const audioUrl = `${base}/api/tts/${fileName}`;
+
+    return res.json({ audioUrl });
+  } catch (err) {
+    console.error('uploadAudio error:', err);
+    return res.status(500).json({ error: 'Error interno subiendo audio' });
+  }
+};
+
