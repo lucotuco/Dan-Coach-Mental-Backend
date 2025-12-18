@@ -67,6 +67,7 @@ export const getRealtimeClientSecret = async (req, res) => {
         extraContext = '';
       }
     }
+    const instructions = DAN_BASE_INSTRUCTIONS + (extraContext ? `\n\n${extraContext}` : '');
 const output_modalities = ['audio']; // como lo tenés ahora
     const voice = 'verse';
 
@@ -79,7 +80,7 @@ const output_modalities = ['audio']; // como lo tenés ahora
         instructionsChars: instructions.length,
       });
     }
-    const instructions = DAN_BASE_INSTRUCTIONS + (extraContext ? `\n\n${extraContext}` : '');
+    
 
     const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
       method: 'POST',
