@@ -131,7 +131,7 @@ export const getRealtimeClientSecret = async (req, res) => {
             input: {
               transcription: {
                 language: 'es',
-                model: 'whisper-1',
+                model: 'whisper-1', 
               },
             },
             output:{

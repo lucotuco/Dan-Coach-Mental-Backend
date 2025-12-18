@@ -48,9 +48,7 @@ export const createTtsAudio = async (req, res) => {
       ? bodyModel
       : (process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts');
 
-    const voice = ALLOWED_VOICES.has(bodyVoice)
-      ? bodyVoice
-      : (process.env.OPENAI_TTS_VOICE || 'verse');
+    const voice = 'verse'
 
     let speed = 1.0;
     if (typeof bodySpeedRaw === 'number') speed = bodySpeedRaw;
