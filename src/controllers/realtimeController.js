@@ -106,9 +106,7 @@ export const getRealtimeClientSecret = async (req, res) => {
         extraContext = '';
       }
     }
-    const requestedMode = (req.get('x-dan-mode') || '').toLowerCase();
-    const allowDev = requestedMode === 'dev';
-    const output_modalities = allowDev ? ['text'] : ['audio', 'text'];
+
     const instructions = DAN_BASE_INSTRUCTIONS + (extraContext ? `\n\n${extraContext}` : '');
 
     const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
@@ -124,7 +122,7 @@ export const getRealtimeClientSecret = async (req, res) => {
           model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
 
           // >>> CLAVE: solo texto (evita doble audio con D-ID)
-          output_modalities,
+          output_modalities: ['text'],
 
           instructions,
 
