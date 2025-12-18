@@ -69,7 +69,7 @@ export const getRealtimeClientSecret = async (req, res) => {
           model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
 
           // CLAVE: solo texto. El audio lo hace tu /api/tts + D-ID.
-          output_modalities: ['text'],
+          output_modalities: ['audio'],
 
           instructions,
 
@@ -80,6 +80,9 @@ export const getRealtimeClientSecret = async (req, res) => {
                 language: 'es',
                 model: 'whisper-1',
               },
+            },
+            ouput:{
+              voice: 'verse',
             },
           },
         },
