@@ -5,11 +5,10 @@ const PUBLIC_ROUTES = [
   { method: 'POST', path: '/api/users/login' },
   { method: 'POST', path: '/api/users' },
 
-  // Público para que D-ID pueda bajar el mp3 (a veces hace HEAD antes de GET)
+  // Público para que D-ID pueda bajar el mp3
   { method: 'GET', prefix: '/api/tts/' },
-  { method: 'HEAD', prefix: '/api/tts/' },
 
-  // Health opcional (útil para testear)
+  // opcional
   { method: 'GET', path: '/health' },
 ];
 

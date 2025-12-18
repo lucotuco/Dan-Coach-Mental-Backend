@@ -1,5 +1,4 @@
 // src/controllers/didController.js
-
 export const getDidConfig = async (req, res) => {
   try {
     const agentId = process.env.DID_AGENT_ID;
@@ -11,8 +10,7 @@ export const getDidConfig = async (req, res) => {
       });
     }
 
-    // Esto se usa en el front para inicializar el Agents SDK
-    return res.json({ agentId, clientKey });
+    return res.json({ ok: true, config: { agentId, clientKey } });
   } catch (err) {
     console.error('getDidConfig error:', err);
     return res.status(500).json({ error: 'Error interno en /api/did/config' });
