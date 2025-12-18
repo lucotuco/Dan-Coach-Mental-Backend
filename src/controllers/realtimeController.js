@@ -81,7 +81,7 @@ export const getRealtimeClientSecret = async (req, res) => {
                 model: 'whisper-1',
               },
             },
-            ouput:{
+            output:{
               voice: 'verse',
             },
           },
