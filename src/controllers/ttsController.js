@@ -43,7 +43,7 @@ async function callOpenAiTts({ apiKey, model, voice, text }) {
       model,
       voice,
       input: text,
-      format: 'mp3',
+      response_format: 'mp3',
     }),
   });
 
