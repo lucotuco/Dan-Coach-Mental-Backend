@@ -29,7 +29,38 @@ app.use((req, res, next) => {
   }
   next();
 });
+const DEBUG_HTTP = process.env.DEBUG_HTTP === '1';
 
+// Opcional pero recomendado en Render/Proxies
+app.set('trust proxy', 1);
+
+app.use((req, res, next) => {
+  if (!DEBUG_HTTP) return next();
+
+  const start = Date.now();
+  const id = Math.random().toString(16).slice(2, 8);
+
+  // NO loguear Authorization (secreto)
+  const origin = req.get('origin') || '';
+  const ua = req.get('user-agent') || '';
+  const xfProto = req.get('x-forwarded-proto') || '';
+  const host = req.get('host') || '';
+
+  // Log “entrada”
+  console.log(
+    `[HTTP ${id}] -> ${req.method} ${req.originalUrl} origin=${origin} host=${host} xfProto=${xfProto} ua=${ua}`
+  );
+
+  res.on('finish', () => {
+    const ms = Date.now() - start;
+    const ct = String(res.getHeader('content-type') || '');
+    console.log(
+      `[HTTP ${id}] <- ${res.statusCode} ${req.method} ${req.originalUrl} ${ms}ms ct=${ct}`
+    );
+  });
+
+  next();
+});
 app.use(authMiddleware);
 
 app.get('/health', (req, res) => {

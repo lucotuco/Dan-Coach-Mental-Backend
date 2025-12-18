@@ -37,12 +37,26 @@ Tool "get_session_history" (traer historial):
  */
 export const getRealtimeClientSecret = async (req, res) => {
   try {
+    const DEBUG_RT = process.env.DEBUG_RT === '1';
+
+    const output = (req.query.output ?? '').toString().toLowerCase(); // ej: "audio" o "text"
+    const did = (req.query.did ?? '').toString(); // si lo usás
+    const userId = req.query.userId;
+
+    if (DEBUG_RT) {
+      console.log('[RT] client-secret request', {
+        method: req.method,
+        url: req.originalUrl,
+        userId: userId || null,
+        output,
+        did,
+      });
+    }
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return res.status(500).json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
     }
 
-    const userId = req.query.userId;
     let extraContext = '';
 
     if (userId) {
@@ -53,7 +67,18 @@ export const getRealtimeClientSecret = async (req, res) => {
         extraContext = '';
       }
     }
+const output_modalities = ['audio']; // como lo tenés ahora
+    const voice = 'verse';
 
+    if (DEBUG_RT) {
+      console.log('[RT] session payload', {
+        model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
+        output_modalities,
+        voice,
+        hasExtraContext: Boolean(extraContext),
+        instructionsChars: instructions.length,
+      });
+    }
     const instructions = DAN_BASE_INSTRUCTIONS + (extraContext ? `\n\n${extraContext}` : '');
 
     const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
@@ -69,10 +94,8 @@ export const getRealtimeClientSecret = async (req, res) => {
           model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
 
           // CLAVE: solo texto. El audio lo hace tu /api/tts + D-ID.
-          output_modalities: ['audio'],
-
+          output_modalities: output_modalities,
           instructions,
-
           // Mic + transcripción del usuario
           audio: {
             input: {
@@ -82,22 +105,24 @@ export const getRealtimeClientSecret = async (req, res) => {
               },
             },
             output:{
-              voice: 'verse',
+              voice: voice,
             },
           },
         },
       }),
     });
 
-    if (!response.ok) {
+   if (!response.ok) {
       const text = await response.text();
-      console.error('Error OpenAI client_secrets:', text);
+      console.error('[RT] OpenAI client_secrets error', {
+        status: response.status,
+        details: text?.slice?.(0, 800) ?? text,
+      });
       return res.status(500).json({
         error: 'No se pudo crear el client_secret de Realtime',
         details: text,
       });
     }
-
     const clientSecret = await response.json();
     return res.json(clientSecret);
   } catch (err) {
