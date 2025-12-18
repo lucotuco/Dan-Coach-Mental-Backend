@@ -1,18 +1,21 @@
 // src/middleware/authMiddleware.js
 import jwt from 'jsonwebtoken';
 
-const DEBUG_AUTH = process.env.DEBUG_AUTH === '1';
-
 const PUBLIC_ROUTES = [
+  // Auth
   { method: 'POST', path: '/api/users/login' },
   { method: 'POST', path: '/api/users' },
 
-  // Público para que D-ID pueda validar/descargar audio
-  { method: 'GET',  prefix: '/api/tts/' },
-  { method: 'HEAD', prefix: '/api/tts/' }, // ✅ clave para validación D-ID
-
   // Health
   { method: 'GET', path: '/health' },
+
+  // (Recomendado) raíz pública para validaciones externas
+  { method: 'GET', path: '/' },
+  { method: 'HEAD', path: '/' },
+
+  // Público para que D-ID pueda validar/bajar audio
+  { method: 'GET', prefix: '/api/tts/' },
+  { method: 'HEAD', prefix: '/api/tts/' },
 ];
 
 function isPublicRoute(req) {
@@ -27,20 +30,10 @@ function isPublicRoute(req) {
 }
 
 export function authMiddleware(req, res, next) {
-  // Extra seguridad: si llega OPTIONS acá, no bloquearlo
-  if (req.method === 'OPTIONS') return next();
-
-  const isPublic = isPublicRoute(req);
-
-  if (DEBUG_AUTH) {
-    console.log(`[AUTH] ${req.method} ${req.originalUrl} path=${req.path} public=${isPublic}`);
-  }
-
-  if (isPublic) return next();
+  if (isPublicRoute(req)) return next();
 
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    if (DEBUG_AUTH) console.warn(`[AUTH] 401 missing bearer: ${req.method} ${req.originalUrl}`);
     return res.status(401).json({ message: 'Token de autorización faltante' });
   }
 
@@ -56,7 +49,6 @@ export function authMiddleware(req, res, next) {
     req.user = decoded;
     return next();
   } catch (error) {
-    if (DEBUG_AUTH) console.warn(`[AUTH] 401 invalid jwt: ${req.method} ${req.originalUrl}`);
     return res.status(401).json({ message: 'Token inválido o expirado' });
   }
 }

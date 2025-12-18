@@ -1,4 +1,3 @@
-// src/routes/didRoutes.js
 import { Router } from 'express';
 import { getDidConfig } from '../controllers/didController.js';
 
