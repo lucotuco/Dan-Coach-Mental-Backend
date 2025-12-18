@@ -5,18 +5,26 @@ import { randomUUID } from 'crypto';
 
 const TTS_DIR = path.join(process.cwd(), 'storage', 'tts');
 
-const ALLOWED_VOICES = new Set([
-  'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer', 'verse',
+// Voces que HOY te acepta tu endpoint (según el error que pegaste)
+// (si OpenAI vuelve a aceptar "verse", tu fallback igual te salva)
+const SAFE_VOICES = new Set([
+  'nova',
+  'shimmer',
+  'echo',
+  'onyx',
+  'fable',
+  'alloy',
+  'ash',
+  'sage',
+  'coral',
 ]);
-
-const ALLOWED_MODELS = new Set(['tts-1', 'tts-1-hd', 'gpt-4o-mini-tts']);
 
 async function ensureDir() {
   await fs.mkdir(TTS_DIR, { recursive: true });
 }
 
 function getPublicBaseUrl(req) {
-  // >>> CLAVE para D-ID: tiene que ser accesible desde internet (https), NO localhost
+  // Debe ser público y HTTPS para D-ID
   const envBase = process.env.PUBLIC_BASE_URL;
   if (envBase) return envBase.replace(/\/+$/, '');
 
@@ -24,10 +32,28 @@ function getPublicBaseUrl(req) {
   return `${proto}://${req.get('host')}`;
 }
 
+async function callOpenAiTts({ apiKey, model, voice, text }) {
+  const r = await fetch('https://api.openai.com/v1/audio/speech', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      voice,
+      input: text,
+      format: 'mp3',
+    }),
+  });
+
+  return r;
+}
+
 /**
  * POST /api/tts
- * Body: { text, model?, voice?, instructions?, speed? }
- * Devuelve: { audioUrl }
+ * Body: { text: string, voice?: string, model?: string }
+ * Devuelve: { audioUrl: string }
  */
 export const createTtsAudio = async (req, res) => {
   try {
@@ -39,44 +65,43 @@ export const createTtsAudio = async (req, res) => {
 
     await ensureDir();
 
-    const bodyModel = (req.body?.model ?? '').toString().trim();
-    const bodyVoice = (req.body?.voice ?? '').toString().trim();
-    const bodyInstructions = (req.body?.instructions ?? '').toString().trim();
-    const bodySpeedRaw = req.body?.speed;
+    const requestedModel = (req.body?.model ?? process.env.OPENAI_TTS_MODEL ?? 'tts-1')
+      .toString()
+      .trim();
 
-    const model = ALLOWED_MODELS.has(bodyModel)
-      ? bodyModel
-      : (process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts');
+    // Default más masculino
+    const requestedVoiceRaw = (req.body?.voice ?? process.env.OPENAI_TTS_VOICE ?? 'onyx')
+      .toString()
+      .trim();
 
-    const voice = 'verse'
+    const requestedVoice = SAFE_VOICES.has(requestedVoiceRaw) ? requestedVoiceRaw : 'onyx';
 
-    let speed = 1.0;
-    if (typeof bodySpeedRaw === 'number') speed = bodySpeedRaw;
-    if (typeof bodySpeedRaw === 'string' && bodySpeedRaw) speed = Number(bodySpeedRaw);
-    if (!Number.isFinite(speed)) speed = 1.0;
-    speed = Math.max(0.25, Math.min(4.0, speed));
-
-    // Si querés “prompt de voz” estable, ponelo en env y/o mandalo desde el front
-    const instructions =
-      bodyInstructions || (process.env.OPENAI_TTS_INSTRUCTIONS || '').toString().trim();
-
-    const payload = {
-      model,
-      voice,
-      input: text,
-      response_format: 'mp3',
-      speed,
-      ...(instructions && model === 'gpt-4o-mini-tts' ? { instructions } : {}),
-    };
-
-    const r = await fetch('https://api.openai.com/v1/audio/speech', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
+    // 1) Intento con voice pedida
+    let r = await callOpenAiTts({
+      apiKey,
+      model: requestedModel,
+      voice: requestedVoice,
+      text,
     });
+
+    // 2) Si falla por voice inválida, fallback a alloy
+    if (!r.ok && requestedVoice !== 'alloy') {
+      const errText = await r.text().catch(() => '');
+      const looksLikeVoiceError =
+        errText.includes(`loc": ("body", "voice")`) || errText.toLowerCase().includes('voice');
+
+      if (looksLikeVoiceError) {
+        r = await callOpenAiTts({
+          apiKey,
+          model: requestedModel,
+          voice: 'alloy',
+          text,
+        });
+      } else {
+        // si no parece error de voice, devolvemos el error original
+        return res.status(500).json({ error: 'OpenAI TTS falló', details: errText });
+      }
+    }
 
     if (!r.ok) {
       const t = await r.text().catch(() => '');
@@ -103,7 +128,7 @@ export const createTtsAudio = async (req, res) => {
 
 /**
  * GET /api/tts/:file
- * Público para D-ID.
+ * Público (sin auth) para que D-ID pueda descargar el mp3.
  */
 export const serveTtsAudio = async (req, res) => {
   try {
@@ -116,8 +141,8 @@ export const serveTtsAudio = async (req, res) => {
 
     const filePath = path.join(TTS_DIR, safe);
 
-    // CORS abierto (útil para debug; D-ID server-to-server no lo necesita)
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
 
     return res.sendFile(filePath);
   } catch (err) {
