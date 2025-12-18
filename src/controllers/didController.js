@@ -9,6 +9,8 @@ export const getDidConfig = async (req, res) => {
         error: 'Faltan DID_AGENT_ID o DID_CLIENT_KEY en .env',
       });
     }
+res.setHeader('Cache-Control', 'no-store');
+res.setHeader('Pragma', 'no-cache');
 
     return res.json({ ok: true, config: { agentId, clientKey } });
   } catch (err) {
