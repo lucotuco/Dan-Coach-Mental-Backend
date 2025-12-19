@@ -1,11 +1,16 @@
+// src/controllers/ttsController.js
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { spawn } from 'child_process';
+import ffmpegPath from 'ffmpeg-static';
 
 const TTS_DIR = path.join(process.cwd(), 'storage', 'tts');
+const TMP_DIR = path.join(process.cwd(), 'storage', 'tmp');
 
-async function ensureDir() {
-  await fs.mkdir(TTS_DIR, { recursive: true });
+async function ensureDir(dir) {
+  await fs.mkdir(dir, { recursive: true });
 }
 
 function getPublicBaseUrl(req) {
@@ -16,7 +21,7 @@ function getPublicBaseUrl(req) {
   return `${proto}://${req.get('host')}`;
 }
 
-const ALLOWED_UPLOAD_EXT = new Set(['wav', 'mp3']);
+const ALLOWED_EXT = new Set(['wav', 'mp3']);
 
 function contentTypeFromExt(ext) {
   if (ext === 'wav') return 'audio/wav';
@@ -24,10 +29,27 @@ function contentTypeFromExt(ext) {
   return 'application/octet-stream';
 }
 
+function runFfmpeg(args) {
+  return new Promise((resolve, reject) => {
+    const bin = ffmpegPath || 'ffmpeg';
+    const p = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+
+    let stderr = '';
+    p.stderr.on('data', (d) => (stderr += d.toString()));
+
+    p.on('error', (err) => reject(err));
+    p.on('close', (code) => {
+      if (code === 0) return resolve();
+      reject(new Error(`ffmpeg exit ${code}: ${stderr.slice(0, 800)}`));
+    });
+  });
+}
+
 /**
  * POST /api/tts/upload
  * Body: { audioBase64: string, ext?: "wav"|"mp3" }
  * Devuelve: { audioUrl }
+ * (Lo dejamos por compatibilidad, aunque la opción C usa upload-recording)
  */
 export const uploadAudio = async (req, res) => {
   try {
@@ -35,9 +57,9 @@ export const uploadAudio = async (req, res) => {
     const ext = ((req.body?.ext ?? 'wav').toString().trim().toLowerCase());
 
     if (!audioBase64) return res.status(400).json({ error: 'Falta audioBase64' });
-    if (!ALLOWED_UPLOAD_EXT.has(ext)) return res.status(400).json({ error: 'ext inválida' });
+    if (!ALLOWED_EXT.has(ext)) return res.status(400).json({ error: 'ext inválida' });
 
-    await ensureDir();
+    await ensureDir(TTS_DIR);
 
     const buf = Buffer.from(audioBase64, 'base64');
     if (!buf?.length) return res.status(400).json({ error: 'audioBase64 inválido' });
@@ -59,83 +81,75 @@ export const uploadAudio = async (req, res) => {
 };
 
 /**
- * POST /api/tts/from-text
- * Body: { text: string, voice?: string, format?: "mp3"|"wav" }
- * Devuelve: { audioUrl }
- *
- * Genera un audio con OpenAI TTS para que D-ID pueda hacer lip-sync.
- * Este endpoint debe quedar protegido (requiere Bearer) — tu authMiddleware global ya lo protege.
+ * POST /api/tts/upload-recording?ext=mp3|wav
+ * multipart/form-data: field "file" (audio/webm;codecs=opus recomendado)
+ * Devuelve: { audioUrl, ext, secondsApprox? }
  */
-export const ttsFromText = async (req, res) => {
+export const uploadRecording = async (req, res) => {
+  const desiredExt = ((req.query.ext ?? 'mp3').toString().trim().toLowerCase());
+  const ext = ALLOWED_EXT.has(desiredExt) ? desiredExt : 'mp3';
+
   try {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
+    const f = req.file;
+    if (!f?.path) return res.status(400).json({ error: 'Falta archivo (field "file")' });
 
-    const text = (req.body?.text ?? '').toString().trim();
-    if (!text) return res.status(400).json({ error: 'Falta text' });
+    await ensureDir(TTS_DIR);
 
-    // Límite práctico para evitar audios enormes por accidente
-    const safeText = text.slice(0, 1200);
+    const outName = `${randomUUID()}.${ext}`;
+    const outPath = path.join(TTS_DIR, outName);
 
-    const voice = ((req.body?.voice ?? process.env.OPENAI_TTS_VOICE ?? 'verse').toString().trim());
-    const format = ((req.body?.format ?? 'mp3').toString().trim().toLowerCase());
-    const ext = format === 'wav' ? 'wav' : 'mp3';
-
-    // Modelo configurable por env (si no está, default razonable)
-    const model = process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts';
-
-    await ensureDir();
-
-    const fileName = `${randomUUID()}.${ext}`;
-    const filePath = path.join(TTS_DIR, fileName);
-
-    // OpenAI TTS: /v1/audio/speech
-    // En algunos SDKs/cambios el parámetro se llama "response_format".
-    // Usamos response_format (mp3|wav) que es lo estándar.
-    const payload = {
-      model,
-      voice,
-      input: safeText,
-      response_format: ext,
-    };
-
-    console.log('[TTS][from-text] generating...', {
-      model,
-      voice,
-      format: ext,
-      chars: safeText.length,
-    });
-
-    const resp = await fetch('https://api.openai.com/v1/audio/speech', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!resp.ok) {
-      const errText = await resp.text().catch(() => '');
-      console.error('[TTS][from-text] OpenAI error:', errText);
-      return res.status(500).json({ error: 'Error generando TTS', details: errText });
+    // Convertimos a un formato estándar para D-ID.
+    // - mono
+    // - 44100 Hz (compatible y liviano)
+    // - mp3 CBR razonable o wav pcm_s16le
+    if (ext === 'mp3') {
+      await runFfmpeg([
+        '-y',
+        '-i', f.path,
+        '-vn',
+        '-ac', '1',
+        '-ar', '44100',
+        '-b:a', '128k',
+        outPath,
+      ]);
+    } else {
+      await runFfmpeg([
+        '-y',
+        '-i', f.path,
+        '-vn',
+        '-ac', '1',
+        '-ar', '44100',
+        '-c:a', 'pcm_s16le',
+        outPath,
+      ]);
     }
 
-    const arrayBuffer = await resp.arrayBuffer();
-    const buf = Buffer.from(arrayBuffer);
-    if (!buf?.length) return res.status(500).json({ error: 'TTS vacío' });
-
-    await fs.writeFile(filePath, buf);
+    // limpiamos tmp
+    try { await fs.unlink(f.path); } catch {}
 
     const base = getPublicBaseUrl(req);
-    const audioUrl = `${base}/api/tts/${fileName}`;
+    const audioUrl = `${base}/api/tts/${outName}`;
 
-    console.log('[TTS][from-text] saved', { bytes: buf.length, audioUrl });
+    console.log('[TTS][upload-recording] converted', {
+      in: path.basename(f.path),
+      out: outName,
+      ext,
+      audioUrl,
+    });
 
-    return res.json({ audioUrl });
+    return res.json({ audioUrl, ext });
   } catch (err) {
-    console.error('ttsFromText error:', err);
-    return res.status(500).json({ error: 'Error interno generando TTS' });
+    console.error('uploadRecording error:', err);
+    // Intentar limpiar tmp si quedó
+    try {
+      if (req.file?.path && fsSync.existsSync(req.file.path)) {
+        await fs.unlink(req.file.path);
+      }
+    } catch {}
+    return res.status(500).json({
+      error: 'Error interno convirtiendo audio (ffmpeg)',
+      details: err?.message ?? String(err),
+    });
   }
 };
 
