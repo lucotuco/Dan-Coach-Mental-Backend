@@ -4,7 +4,12 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
 
-import { uploadAudio, uploadRecording, serveTtsAudio } from '../controllers/ttsController.js';
+import {
+  uploadAudio,
+  uploadRecording,
+  serveTtsAudio,
+  synthesizeTts,
+} from '../controllers/ttsController.js';
 
 const router = Router();
 
@@ -34,6 +39,9 @@ const upload = multer({
   storage,
   limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
 });
+
+// Protegido (requiere Bearer): TTS desde texto (lo usa el front)
+router.post('/synthesize', synthesizeTts);
 
 // Protegido (requiere Bearer): subir audio base64 (legacy)
 router.post('/upload', uploadAudio);

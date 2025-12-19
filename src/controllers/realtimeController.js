@@ -29,10 +29,16 @@ Tool "get_session_history" (traer historial):
 - Usala SOLO si el usuario lo pide, o si refiere otra charla y necesitás detalles.
 - Si es “necesito detalles” sin pedido explícito: preguntá 1 vez si quiere que revises historial.
 - Pedí 3–6 máximo y usalo en silencio.
+
+REGLA CRÍTICA (SALIDA):
+- Respondé SIEMPRE en TEXTO.
+- No generes audio, no describas sonidos, no pongas acotaciones tipo "(hablando)".
+- Pensá que un TTS externo va a leer tu texto tal cual: escribí natural y directo.
 `.trim();
 
 /**
  * GET /api/realtime/client-secret
+ * Realtime = cerebro + STT input. Salida: SOLO TEXTO.
  */
 export const getRealtimeClientSecret = async (req, res) => {
   try {
@@ -67,11 +73,12 @@ export const getRealtimeClientSecret = async (req, res) => {
       type: 'realtime',
       model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
 
-      // AUDIO ONLY: el texto de DAN lo vas a obtener por output_audio_transcript en el FRONT
-      output_modalities: ['audio'],
+      // SOLO TEXTO (para que el audio lo genere TTS externo).
+      output_modalities: ['text'],
 
       instructions,
 
+      // Mantenemos STT del usuario (audio input -> transcript).
       audio: {
         input: {
           transcription: {
@@ -79,16 +86,12 @@ export const getRealtimeClientSecret = async (req, res) => {
             model: 'whisper-1',
           },
         },
-        output: {
-          voice: 'verse',
-        },
       },
     };
 
     console.log('[RT] session payload', {
       model: sessionPayload.model,
       output_modalities: sessionPayload.output_modalities,
-      voice: sessionPayload.audio?.output?.voice,
       hasExtraContext: Boolean(extraContext),
       instructionsChars: instructions.length,
     });
