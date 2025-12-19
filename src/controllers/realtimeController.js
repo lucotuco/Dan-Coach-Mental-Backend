@@ -1,4 +1,3 @@
-// src/controllers/realtimeController.js
 import { buildCoachContext } from '../services/coachContext.js';
 import { CoachSession } from '../models/CoachSession.js';
 
@@ -10,7 +9,7 @@ Si aparecen autolesiones, suicidio, depresión grave, traumas, adicciones, viole
 
 Tono y lenguaje: Soná como una charla cercana, no como una sesión formal. Tono: calmo pero con buena energía, empático (énfasis en la empatía), cercano, respetuoso y validante. Nunca juzgar, sermonear, retar, minimizar ni comparar negativamente. Usá “vos” (rioplatense). Palabras simples, metáforas sencillas, sin tecnicismos. Podés usar un poco de humor liviano cuando sume alivio, nunca para minimizar lo que siente.
 
-VOZ (para tu TTS luego): masculina adulta, cálida, registro medio; ritmo conversacional con micro-pausas; frases cortas; entonación suave; dicción clara; nada de tono locutor/robot.
+VOZ: masculina adulta, cálida, registro medio; ritmo conversacional con micro-pausas; frases cortas; entonación suave; dicción clara; nada de tono locutor/robot.
 
 Frases que podés usar (inspiración, variá): “Es válido sentirte así.”, “Gracias por compartirlo.”, “Volvamos al presente.”, “Observá sin juzgar.”, etc.
 
@@ -34,13 +33,6 @@ Tool "get_session_history" (traer historial):
 
 /**
  * GET /api/realtime/client-secret
- * Query:
- *  - userId?: string
- *  - output?: "text" | "audio"
- *
- * IMPORTANTE:
- *  - Para lip-sync con D-ID (estable): usar output=text y luego TTS vía /api/tts.
- *  - Si pedís output=audio, enviamos audio+text (para tener transcript) pero NO lo uses para lip-sync.
  */
 export const getRealtimeClientSecret = async (req, res) => {
   try {
@@ -49,16 +41,14 @@ export const getRealtimeClientSecret = async (req, res) => {
       return res.status(500).json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
     }
 
-    const userId = (req.query.userId ?? '').toString().trim() || undefined;
-    const output = (req.query.output ?? 'text').toString().trim().toLowerCase();
-
-    const wantsAudio = output === 'audio';
+    const userId = req.query.userId;
+    const output = (req.query.output ?? '').toString();
 
     console.log('[RT] client-secret request', {
       method: req.method,
       url: req.originalUrl,
-      userId: userId ?? null,
-      output,
+      userId: userId || null,
+      output: output || null,
     });
 
     let extraContext = '';
@@ -77,13 +67,11 @@ export const getRealtimeClientSecret = async (req, res) => {
       type: 'realtime',
       model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
 
-      // ✅ Para lip-sync: el front pide output=text y hace TTS + D-ID.
-      // ✅ Si output=audio: incluimos 'text' también para tener transcripción del assistant.
-      output_modalities: wantsAudio ? ['audio', 'text'] : ['text'],
+      // AUDIO ONLY: el texto de DAN lo vas a obtener por output_audio_transcript en el FRONT
+      output_modalities: ['audio'],
 
       instructions,
 
-      // Mic + transcripción del usuario
       audio: {
         input: {
           transcription: {
@@ -91,19 +79,17 @@ export const getRealtimeClientSecret = async (req, res) => {
             model: 'whisper-1',
           },
         },
-        ...(wantsAudio
-          ? {
-              output: { voice: 'verse' },
-            }
-          : {}),
+        output: {
+          voice: 'verse',
+        },
       },
     };
 
     console.log('[RT] session payload', {
       model: sessionPayload.model,
       output_modalities: sessionPayload.output_modalities,
-      voice: wantsAudio ? 'verse' : null,
-      hasExtraContext: !!extraContext,
+      voice: sessionPayload.audio?.output?.voice,
+      hasExtraContext: Boolean(extraContext),
       instructionsChars: instructions.length,
     });
 
