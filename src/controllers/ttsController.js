@@ -150,7 +150,7 @@ export const synthesizeTts = async (req, res) => {
     await ensureDir(TMP_DIR);
 
     const ttsModel = process.env.TTS_MODEL || 'gpt-4o-mini-tts';
-    const ttsVoice = process.env.TTS_VOICE || 'verse';
+    const ttsVoice = process.env.TTS_VOICE || 'alloy';
 
     const client = new OpenAI({ apiKey });
 
