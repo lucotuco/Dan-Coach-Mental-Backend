@@ -16,6 +16,10 @@ const PUBLIC_ROUTES = [
   // Público para que D-ID pueda validar/bajar audio
   { method: 'GET', prefix: '/api/tts/' },
   { method: 'HEAD', prefix: '/api/tts/' },
+
+  // NUEVO: Público para que el <video src="..."> pueda cargar el idle_video proxyeado (sin Authorization)
+  { method: 'GET', path: '/api/did/proxy' },
+  { method: 'HEAD', path: '/api/did/proxy' },
 ];
 
 function isPublicRoute(req) {
