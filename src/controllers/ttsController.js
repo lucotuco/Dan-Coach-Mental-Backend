@@ -5,16 +5,21 @@ import { randomUUID } from 'crypto';
 
 const TTS_DIR = path.join(process.cwd(), 'storage', 'tts');
 
+// Voces built-in soportadas por /v1/audio/speech (según doc actual)
 const ALLOWED_TTS_VOICES = new Set([
-  'nova',
-  'shimmer',
-  'echo',
-  'onyx',
-  'fable',
   'alloy',
   'ash',
-  'sage',
+  'ballad',
   'coral',
+  'echo',
+  'fable',
+  'onyx',
+  'nova',
+  'sage',
+  'shimmer',
+  'verse',
+  'marin',
+  'cedar',
 ]);
 
 async function ensureDir() {
@@ -22,6 +27,7 @@ async function ensureDir() {
 }
 
 function getPublicBaseUrl(req) {
+  // Debe ser accesible públicamente por D-ID (HTTPS).
   const envBase = process.env.PUBLIC_BASE_URL;
   if (envBase) return envBase.replace(/\/+$/, '');
 
@@ -29,15 +35,27 @@ function getPublicBaseUrl(req) {
   return `${proto}://${req.get('host')}`;
 }
 
-function pickVoice(requested, fallbackValid) {
+function pickVoice(requested, fallback) {
   const v = (requested || '').toString().trim();
   if (ALLOWED_TTS_VOICES.has(v)) return v;
-  return fallbackValid;
+  return fallback;
+}
+
+function isMiniTtsModel(model) {
+  return typeof model === 'string' && model.startsWith('gpt-4o-mini-tts');
 }
 
 /**
  * POST /api/tts
- * Body: { text: string, voice?: string, model?: string }
+ * Body: {
+ *   text: string,
+ *   voice?: string,
+ *   model?: string,
+ *   instructions?: string,
+ *   speed?: number,
+ *   response_format?: "mp3"|"opus"|"aac"|"flac"|"wav"|"pcm"
+ * }
+ * Devuelve: { audioUrl: string }
  */
 export const createTtsAudio = async (req, res) => {
   try {
@@ -49,14 +67,35 @@ export const createTtsAudio = async (req, res) => {
 
     await ensureDir();
 
-    const model = (req.body?.model ?? process.env.OPENAI_TTS_MODEL ?? 'tts-1').toString().trim();
+    // Modelo por defecto: gpt-4o-mini-tts (necesario si querés usar `instructions`)
+    // Modelos válidos: tts-1, tts-1-hd, gpt-4o-mini-tts, gpt-4o-mini-tts-2025-12-15
+    const model = (req.body?.model ?? process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts')
+      .toString()
+      .trim();
 
-    // DEFAULT SIEMPRE VÁLIDO (no "verse")
-    const fallbackVoice = ALLOWED_TTS_VOICES.has((process.env.OPENAI_TTS_VOICE ?? '').trim())
-      ? (process.env.OPENAI_TTS_VOICe ?? '').trim()
-      : 'onyx';
+    // Voice por defecto: verse
+    const defaultVoice = (process.env.OPENAI_TTS_VOICE ?? 'verse').toString().trim();
+    const voice = pickVoice(req.body?.voice, defaultVoice);
 
-    const voice = pickVoice(req.body?.voice, fallbackVoice);
+    // `instructions` controla la voz, pero NO funciona con tts-1/tts-1-hd
+    // (solo lo mandamos si es gpt-4o-mini-tts*)
+    const instructionsRaw =
+      (req.body?.instructions ?? process.env.OPENAI_TTS_INSTRUCTIONS ?? '').toString().trim();
+
+    const speedNum = Number(req.body?.speed);
+    const speed =
+      Number.isFinite(speedNum) && speedNum >= 0.25 && speedNum <= 4.0 ? speedNum : undefined;
+
+    const response_format = (req.body?.response_format ?? 'mp3').toString().trim();
+
+    const payload = {
+      model,
+      voice,
+      input: text,
+      response_format, // spec actual del endpoint
+      ...(speed ? { speed } : {}),
+      ...(isMiniTtsModel(model) && instructionsRaw ? { instructions: instructionsRaw } : {}),
+    };
 
     const r = await fetch('https://api.openai.com/v1/audio/speech', {
       method: 'POST',
@@ -64,12 +103,7 @@ export const createTtsAudio = async (req, res) => {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        model,
-        voice,
-        input: text,
-        format: 'mp3',
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!r.ok) {
@@ -81,8 +115,9 @@ export const createTtsAudio = async (req, res) => {
     const arrayBuf = await r.arrayBuffer();
     const buf = Buffer.from(arrayBuf);
 
+    // Sanity check mínimo
     if (!buf || buf.length < 800) {
-      return res.status(500).json({ error: 'TTS devolvió un mp3 inválido (muy chico)' });
+      return res.status(500).json({ error: 'TTS devolvió un audio inválido (muy chico)' });
     }
 
     const fileName = `${randomUUID()}.mp3`;
@@ -99,12 +134,18 @@ export const createTtsAudio = async (req, res) => {
   }
 };
 
+/**
+ * GET/HEAD /api/tts/:file
+ * Público (sin auth) para que D-ID pueda descargar/validar el mp3.
+ */
 export const serveTtsAudio = async (req, res) => {
   try {
     const file = (req.params.file ?? '').toString();
     const safe = path.basename(file);
 
-    if (!safe.endsWith('.mp3')) return res.status(400).json({ error: 'Formato inválido' });
+    if (!safe.endsWith('.mp3')) {
+      return res.status(400).json({ error: 'Formato inválido' });
+    }
 
     const filePath = path.join(TTS_DIR, safe);
 
