@@ -8,19 +8,9 @@ Identidad y límites:Sos: un hombre, coach mental, guía calmo, facilitador, ent
 
 Si aparecen autolesiones, suicidio, depresión grave, traumas, adicciones, violencia o abuso: Aclarar que sos coach mental, no profesional clínico. No profundizar en detalles. Sugerir ayuda profesional presencial, un adulto de confianza o una línea de ayuda.
 
-Tono y lenguaje: Soná como una charla cercana, no como una sesión formal. Tono: calmo pero con buena energía, empático (énfasis en la empatía), cercano, respetuoso y validante. Nunca juzgar, sermonear, retar, minimizar ni comparar negativamente. Usá “vos” (rioplatense). Palabras simples, metáforas sencillas, sin tecnicismos. Podés usar un poco de humor liviano cuando sume alivio, nunca para minimizar lo que siente.
+Tono y lenguaje: Soná como una charla cercana, no como una sesión formal. Tono: calmo pero con buena energía, empático (énfasis en la empatía), cercano, respetuoso y validante. Nunca juzgar, sermonear, retar, minimizar ni comparar negativamente. Usá “vos” (rioplatense). Palabras simples, metáforas sencillas, sin tecnicismos.
 
-VOZ: masculina adulta, cálida, registro medio; ritmo conversacional con micro-pausas; frases cortas; entonación suave (sube al preguntar, cae al cerrar); sonrisa leve al validar; firme sin autoritarismo; dicción clara; nada de tono locutor/robot.
-
-Frases que podés usar (inspiración, variá): “Es válido sentirte así.”, “Gracias por compartirlo.”, “Volvamos al presente.”, “Observá sin juzgar.”, etc.
-
-Frases que NO uses (ni equivalentes): “No pasa nada.”, “No te frustres / no te enojes.”, “Eso está mal.”, “Tenés que…”, comparaciones negativas, “No es para tanto.”.
-
-Estilo de conversación (tiempo real): natural, espontáneo, cálido. Frases cortas, claras, fáciles de seguir. Podés usar muletillas suaves (“ok”, “ajá”, “claro”, “te entiendo”), pero variá y no las repitas siempre. A veces cerrá con pregunta corta; otras veces cerrá con confirmación o propuesta breve (no siempre pregunta). Adaptá el lenguaje a la edad y al deporte (sin tecnicismos).
-
-Memoria de sesiones y tools:
-- Tool "save_session_summary": NO la uses por tu cuenta; solo cuando el usuario va a cortar.
-- Tool "get_session_history": NO por defecto; solo si usuario lo pide o hace referencia y confirmás.
+VOZ (solo para estilo): masculina adulta, cálida, registro medio; ritmo conversacional con micro-pausas; frases cortas; entonación suave; sonrisa leve al validar; firme sin autoritarismo; dicción clara.
 
 IMPORTANTE: Respondé SOLO en TEXTO. No generes audio.
 `.trim();
@@ -31,9 +21,7 @@ IMPORTANTE: Respondé SOLO en TEXTO. No generes audio.
 export const getRealtimeClientSecret = async (req, res) => {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
-    }
+    if (!apiKey) return res.status(500).json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
 
     const userId = req.query.userId;
     let extraContext = '';
@@ -43,7 +31,6 @@ export const getRealtimeClientSecret = async (req, res) => {
         extraContext = await buildCoachContext(userId);
       } catch (err) {
         console.error('Error armando contexto de coach:', err);
-        extraContext = '';
       }
     }
 
@@ -61,27 +48,18 @@ export const getRealtimeClientSecret = async (req, res) => {
           type: 'realtime',
           model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
 
-          // CLAVE: solo texto
+          // BACK: pedimos solo texto
           output_modalities: ['text'],
 
           instructions,
 
-          // Mic + transcripción del usuario
-          // CLAVE: NO auto-response por VAD (lo dispara el front con response.create)
+          // Mantenemos mic + transcripción del usuario (pero sin audio output)
           audio: {
             input: {
-              transcription: {
-                language: 'es',
-                model: 'whisper-1',
-              },
-              turn_detection: {
-                type: 'server_vad',
-                threshold: 0.5,
-                prefix_padding_ms: 300,
-                silence_duration_ms: 200,
-                create_response: false,
-                interrupt_response: true,
-              },
+              transcription: { language: 'es', model: 'whisper-1' },
+              // Si vos ya seteás server_vad desde otro lado, dejalo como está.
+              // Si no, podés configurar turn_detection acá.
+              // turn_detection: { type: 'server_vad' }
             },
           },
         },
@@ -91,10 +69,7 @@ export const getRealtimeClientSecret = async (req, res) => {
     if (!response.ok) {
       const text = await response.text();
       console.error('Error OpenAI client_secrets:', text);
-      return res.status(500).json({
-        error: 'No se pudo crear el client_secret de Realtime',
-        details: text,
-      });
+      return res.status(500).json({ error: 'No se pudo crear el client_secret de Realtime', details: text });
     }
 
     const clientSecret = await response.json();
