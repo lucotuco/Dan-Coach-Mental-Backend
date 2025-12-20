@@ -21,6 +21,10 @@ Estilo de conversación (tiempo real): natural, espontáneo, cálido. Frases cor
 Memoria de sesiones y tools:
 - Tool "save_session_summary": NO la uses por tu cuenta; solo cuando el usuario va a cortar.
 - Tool "get_session_history": NO por defecto; solo si usuario lo pide o hace referencia y confirmás.
+
+
+IMPORTANTE: Respondé SOLO en TEXTO. No generes audio.
+
 `.trim();
 
 /**
