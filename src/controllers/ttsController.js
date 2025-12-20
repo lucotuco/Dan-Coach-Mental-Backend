@@ -54,12 +54,12 @@ export const createTtsAudio = async (req, res) => {
 
     // Model por defecto (podés setearlo por env)
     // Mantengo compatibilidad con tu setup.
-    const model = (req.body?.model ?? process.env.OPENAI_TTS_MODEL ?? 'tts-1')
+    const model = (req.body?.model ?? process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts')
       .toString()
       .trim();
 
     // IMPORTANTE: “verse” NO es válido en /v1/audio/speech
-    const defaultVoice = (process.env.OPENAI_TTS_VOICE ?? 'onyx').toString().trim();
+    const defaultVoice = (process.env.OPENAI_TTS_VOICE ?? 'verse').toString().trim();
     const voice = pickVoice(req.body?.voice, defaultVoice);
 
     const r = await fetch('https://api.openai.com/v1/audio/speech', {
