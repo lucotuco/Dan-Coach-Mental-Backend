@@ -4,12 +4,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
 
-import {
-  uploadAudio,
-  uploadRecording,
-  serveTtsAudio,
-  synthesizeTts,
-} from '../controllers/ttsController.js';
+import { uploadAudio, uploadRecording, serveTtsAudio, synthesizeTts } from '../controllers/ttsController.js';
 
 const router = Router();
 
@@ -19,7 +14,6 @@ async function ensureTmp() {
   await fs.mkdir(TMP_DIR, { recursive: true });
 }
 
-// Multer a disco (no memoria) para audios
 const storage = multer.diskStorage({
   destination: async (_req, _file, cb) => {
     try {
@@ -37,11 +31,8 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+  limits: { fileSize: 20 * 1024 * 1024 },
 });
-
-// Protegido (requiere Bearer): TTS desde texto (lo usa el front)
-router.post('/synthesize', synthesizeTts);
 
 // Protegido (requiere Bearer): subir audio base64 (legacy)
 router.post('/upload', uploadAudio);
@@ -49,7 +40,10 @@ router.post('/upload', uploadAudio);
 // Protegido (requiere Bearer): subir recording (multipart) y convertir a mp3/wav
 router.post('/upload-recording', upload.single('file'), uploadRecording);
 
-// Público: servir audio para D-ID (incluye HEAD para validación)
+// NUEVO: Protegido (requiere Bearer): generar TTS desde texto -> devuelve audioUrl público
+router.post('/synthesize', synthesizeTts);
+
+// Público: servir audio para D-ID
 router.get('/:file', serveTtsAudio);
 router.head('/:file', serveTtsAudio);
 

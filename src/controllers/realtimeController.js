@@ -1,3 +1,4 @@
+// src/controllers/realtimeController.js
 import { buildCoachContext } from '../services/coachContext.js';
 import { CoachSession } from '../models/CoachSession.js';
 
@@ -11,11 +12,7 @@ Tono y lenguaje: Soná como una charla cercana, no como una sesión formal. Tono
 
 VOZ: masculina adulta, cálida, registro medio; ritmo conversacional con micro-pausas; frases cortas; entonación suave; dicción clara; nada de tono locutor/robot.
 
-Frases que podés usar (inspiración, variá): “Es válido sentirte así.”, “Gracias por compartirlo.”, “Volvamos al presente.”, “Observá sin juzgar.”, etc.
-
-Frases que NO uses (ni equivalentes): “No pasa nada.”, “No te frustres / no te enojes.”, “Eso está mal.”, “Tenés que…”, comparaciones negativas, “No es para tanto.”.
-
-Estilo de conversación (tiempo real): natural, espontáneo, cálido. Frases cortas, claras, fáciles de seguir. Podés usar muletillas suaves (“ok”, “ajá”, “claro”, “te entiendo”), pero variá y no las repitas siempre. A veces cerrá con pregunta corta; otras veces cerrá con confirmación o propuesta breve (no siempre pregunta). Adaptá el lenguaje a la edad y al deporte (sin tecnicismos).
+IMPORTANTE: Respondé SOLO en TEXTO. No generes audio.
 
 Memoria de sesiones y tools:
 Tool "save_session_summary" (guardar):
@@ -29,16 +26,10 @@ Tool "get_session_history" (traer historial):
 - Usala SOLO si el usuario lo pide, o si refiere otra charla y necesitás detalles.
 - Si es “necesito detalles” sin pedido explícito: preguntá 1 vez si quiere que revises historial.
 - Pedí 3–6 máximo y usalo en silencio.
-
-REGLA CRÍTICA (SALIDA):
-- Respondé SIEMPRE en TEXTO.
-- No generes audio, no describas sonidos, no pongas acotaciones tipo "(hablando)".
-- Pensá que un TTS externo va a leer tu texto tal cual: escribí natural y directo.
 `.trim();
 
 /**
  * GET /api/realtime/client-secret
- * Realtime = cerebro + STT input. Salida: SOLO TEXTO.
  */
 export const getRealtimeClientSecret = async (req, res) => {
   try {
@@ -48,13 +39,11 @@ export const getRealtimeClientSecret = async (req, res) => {
     }
 
     const userId = req.query.userId;
-    const output = (req.query.output ?? '').toString();
 
     console.log('[RT] client-secret request', {
       method: req.method,
       url: req.originalUrl,
       userId: userId || null,
-      output: output || null,
     });
 
     let extraContext = '';
@@ -73,12 +62,12 @@ export const getRealtimeClientSecret = async (req, res) => {
       type: 'realtime',
       model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
 
-      // SOLO TEXTO (para que el audio lo genere TTS externo).
+      // TEXT ONLY: Realtime genera texto; el audio lo genera tu TTS y lo reproduce D-ID.
       output_modalities: ['text'],
 
       instructions,
 
-      // Mantenemos STT del usuario (audio input -> transcript).
+      // Seguimos habilitando input audio + transcripción del usuario
       audio: {
         input: {
           transcription: {
