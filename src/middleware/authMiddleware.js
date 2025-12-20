@@ -20,6 +20,9 @@ const PUBLIC_ROUTES = [
   // NUEVO: Público para que el <video src="..."> pueda cargar el idle_video proxyeado (sin Authorization)
   { method: 'GET', path: '/api/did/proxy' },
   { method: 'HEAD', path: '/api/did/proxy' },
+
+  { method: 'GET', path: '/api/did/idle-video' },
+  { method: 'HEAD', path: '/api/did/idle-video' },
 ];
 
 function isPublicRoute(req) {

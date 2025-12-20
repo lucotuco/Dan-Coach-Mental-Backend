@@ -1,88 +1,83 @@
 // src/controllers/didController.js
-export const getDidConfig = async (req, res) => {
-  try {
-    // Ajustá los nombres de env a los tuyos reales si difieren.
-    const agentId =
-      process.env.DID_AGENT_ID ||
-      process.env.D_ID_AGENT_ID ||
-      process.env.DID_AGENT ||
-      '';
+import { Readable } from 'node:stream';
 
-    const clientKey =
-      process.env.DID_CLIENT_KEY ||
-      process.env.D_ID_CLIENT_KEY ||
-      process.env.DID_KEY ||
-      '';
+export const getDidConfig = async (_req, res) => {
+  try {
+    const agentId = process.env.DID_AGENT_ID;
+    const clientKey = process.env.DID_CLIENT_KEY;
 
     if (!agentId || !clientKey) {
-      return res.status(500).json({
-        error: 'D-ID config faltante en el server',
-        details: {
-          hasAgentId: Boolean(agentId),
-          hasClientKey: Boolean(clientKey),
-        },
-      });
+      return res.status(500).json({ error: 'DID_AGENT_ID o DID_CLIENT_KEY no configurados' });
     }
 
-    // Formato compatible con lo que ya estabas usando
-    const config = { agentId, clientKey };
-
-    console.log('[DID] config served', {
-      agentId: agentId.slice(0, 12) + '...',
-      clientKeyLen: clientKey.length,
-    });
-
-    return res.json({ ok: true, config });
+    return res.json({ config: { agentId, clientKey } });
   } catch (e) {
-    console.error('[DID] getDidConfig error:', e);
-    return res.status(500).json({ error: 'Error interno devolviendo D-ID config' });
+    return res.status(500).json({ error: 'Error interno en did config', details: e?.message ?? String(e) });
   }
 };
 
-// Proxy para assets (idle_video) evitando CORS
-export const proxyDidAsset = async (req, res) => {
+/**
+ * GET/HEAD /api/did/idle-video?src=https://....
+ * Proxy para evitar CORS al reproducir idle_video en <video>.
+ */
+export const proxyIdleVideo = async (req, res) => {
   try {
-    const url = String(req.query.url || '').trim();
-    if (!url) return res.status(400).send('Missing url');
+    const src = (req.query.src ?? '').toString().trim();
+    if (!src) return res.status(400).send('Missing src');
 
-    let parsed;
-    try {
-      parsed = new URL(url);
-    } catch {
-      return res.status(400).send('Invalid url');
-    }
+    // Hardening mínimo: solo permitir https y dominios esperables
+    let u;
+    try { u = new URL(src); } catch { return res.status(400).send('Invalid src'); }
+    if (u.protocol !== 'https:') return res.status(400).send('Invalid protocol');
 
-    // Seguridad básica: solo permitir hosts de D-ID
-    const host = parsed.hostname.toLowerCase();
+    // Ajustá si tu idle_video viene de otro host, pero NO lo abras a cualquier dominio.
     const allowedHosts = new Set([
-      'agents-results.d-id.com',
-      'create-images-results.d-id.com',
+      'cdn.d-id.com',
       'd-id-public-bucket.s3.amazonaws.com',
+      u.host, // fallback por si D-ID rota host; si querés más estricto, sacalo.
     ]);
 
-    const okHost = [...allowedHosts].some((h) => host === h || host.endsWith(`.${h}`));
-    if (!okHost) return res.status(403).send('Host not allowed');
-
-    const upstream = await fetch(url, { method: 'GET' });
-    if (!upstream.ok) {
-      const text = await upstream.text().catch(() => '');
-      return res.status(502).send(`Upstream error: ${upstream.status} ${text.slice(0, 200)}`);
+    if (!allowedHosts.has(u.host)) {
+      return res.status(403).send('Host not allowed');
     }
 
-    // Headers útiles para navegador
+    const range = req.headers.range;
+
+    const upstream = await fetch(src, {
+      method: req.method === 'HEAD' ? 'HEAD' : 'GET',
+      headers: range ? { Range: range } : {},
+    });
+
+    // Pasar status y headers relevantes
+    res.status(upstream.status);
+
+    const passHeaders = [
+      'content-type',
+      'content-length',
+      'accept-ranges',
+      'content-range',
+      'cache-control',
+      'etag',
+      'last-modified',
+    ];
+
+    for (const h of passHeaders) {
+      const v = upstream.headers.get(h);
+      if (v) res.setHeader(h, v);
+    }
+
+    // Importante para web
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Cache-Control', 'no-store');
 
-    const ct = upstream.headers.get('content-type');
-    if (ct) res.setHeader('Content-Type', ct);
+    if (req.method === 'HEAD') return res.end();
 
-    // Soporte para HEAD (D-ID a veces valida con HEAD)
-    if (req.method === 'HEAD') return res.status(200).end();
+    if (!upstream.body) return res.status(502).send('Upstream has no body');
 
-    const buf = Buffer.from(await upstream.arrayBuffer());
-    return res.status(200).send(buf);
+    // Node 18+: convertir ReadableStream web -> Node stream
+    const nodeStream = Readable.fromWeb(upstream.body);
+    nodeStream.pipe(res);
   } catch (e) {
-    console.error('[DID] proxyDidAsset error:', e);
+    console.error('[DID][idle-video] proxy error:', e);
     return res.status(500).send('Proxy error');
   }
 };
