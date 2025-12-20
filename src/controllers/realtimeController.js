@@ -22,9 +22,7 @@ Memoria de sesiones y tools:
 - Tool "save_session_summary": NO la uses por tu cuenta; solo cuando el usuario va a cortar.
 - Tool "get_session_history": NO por defecto; solo si usuario lo pide o hace referencia y confirmás.
 
-
 IMPORTANTE: Respondé SOLO en TEXTO. No generes audio.
-
 `.trim();
 
 /**
@@ -63,17 +61,26 @@ export const getRealtimeClientSecret = async (req, res) => {
           type: 'realtime',
           model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
 
-          // CLAVE: solo texto (así no gastás audio tokens del asistente)
+          // CLAVE: solo texto
           output_modalities: ['text'],
 
           instructions,
 
           // Mic + transcripción del usuario
+          // CLAVE: NO auto-response por VAD (lo dispara el front con response.create)
           audio: {
             input: {
               transcription: {
                 language: 'es',
                 model: 'whisper-1',
+              },
+              turn_detection: {
+                type: 'server_vad',
+                threshold: 0.5,
+                prefix_padding_ms: 300,
+                silence_duration_ms: 200,
+                create_response: false,
+                interrupt_response: true,
               },
             },
           },
