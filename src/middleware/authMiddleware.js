@@ -2,27 +2,16 @@
 import jwt from 'jsonwebtoken';
 
 const PUBLIC_ROUTES = [
-  // Auth
   { method: 'POST', path: '/api/users/login' },
   { method: 'POST', path: '/api/users' },
 
-  // Health
-  { method: 'GET', path: '/health' },
-
-  // (Recomendado) raíz pública para validaciones externas
-  { method: 'GET', path: '/' },
-  { method: 'HEAD', path: '/' },
-
-  // Público para que D-ID pueda validar/bajar audio
+  // Público para que D-ID pueda VALIDAR y BAJAR el mp3
+  // Importante: D-ID suele hacer HEAD antes de GET
   { method: 'GET', prefix: '/api/tts/' },
   { method: 'HEAD', prefix: '/api/tts/' },
 
-  // NUEVO: Público para que el <video src="..."> pueda cargar el idle_video proxyeado (sin Authorization)
-  { method: 'GET', path: '/api/did/proxy' },
-  { method: 'HEAD', path: '/api/did/proxy' },
-
-  { method: 'GET', path: '/api/did/idle-video' },
-  { method: 'HEAD', path: '/api/did/idle-video' },
+  // opcional
+  { method: 'GET', path: '/health' },
 ];
 
 function isPublicRoute(req) {
@@ -40,6 +29,7 @@ export function authMiddleware(req, res, next) {
   if (isPublicRoute(req)) return next();
 
   const authHeader = req.headers.authorization;
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ message: 'Token de autorización faltante' });
   }
