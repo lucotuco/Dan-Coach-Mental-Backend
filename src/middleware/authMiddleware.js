@@ -2,13 +2,24 @@
 import jwt from 'jsonwebtoken';
 
 const PUBLIC_ROUTES = [
+  // Auth
   { method: 'POST', path: '/api/users/login' },
   { method: 'POST', path: '/api/users' },
 
+  // Health
+  { method: 'GET', path: '/health' },
+
+  // raíz pública
+  { method: 'GET', path: '/' },
+  { method: 'HEAD', path: '/' },
+
+  // Público para que D-ID pueda validar/bajar audio
   { method: 'GET', prefix: '/api/tts/' },
   { method: 'HEAD', prefix: '/api/tts/' },
 
-  { method: 'GET', path: '/health' },
+  // Proxy idle video (el <video> no manda bearer)
+  { method: 'GET', path: '/api/did/idle-video' },
+  { method: 'HEAD', path: '/api/did/idle-video' },
 ];
 
 function isPublicRoute(req) {
@@ -33,13 +44,15 @@ export function authMiddleware(req, res, next) {
   const token = authHeader.split(' ')[1];
   const JWT_SECRET = process.env.JWT_SECRET;
 
-  if (!JWT_SECRET) return res.status(500).json({ message: 'Configuración de JWT faltante' });
+  if (!JWT_SECRET) {
+    return res.status(500).json({ message: 'Configuración de JWT faltante' });
+  }
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
     return next();
-  } catch {
+  } catch (error) {
     return res.status(401).json({ message: 'Token inválido o expirado' });
   }
 }

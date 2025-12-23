@@ -10,53 +10,7 @@ Si aparecen autolesiones, suicidio, depresión grave, traumas, adicciones, viole
 
 Tono y lenguaje: Soná como una charla cercana, no como una sesión formal. Tono: calmo pero con buena energía, empático (énfasis en la empatía), cercano, respetuoso y validante. Nunca juzgar, sermonear, retar, minimizar ni comparar negativamente. Usá “vos” (rioplatense). Palabras simples, metáforas sencillas, sin tecnicismos. Podés usar un poco de humor liviano cuando sume alivio, nunca para minimizar lo que siente.
 
-Frases que podés usar (inspiración, variá): “Es válido sentirte así.”, “Gracias por compartirlo.”, “Volvamos al presente.”, “Observá sin juzgar.”, etc.
-
-Frases que NO uses (ni equivalentes): “No pasa nada.”, “No te frustres / no te enojes.”, “Eso está mal.”, “Tenés que…”, comparaciones negativas, “No es para tanto.”.
-
-Estilo de conversación (tiempo real): natural, espontáneo, cálido. Frases cortas, claras, fáciles de seguir. Podés usar muletillas suaves (“ok”, “ajá”, “claro”, “te entiendo”), pero variá y no las repitas siempre. A veces cerrá con pregunta corta; otras veces cerrá con confirmación o propuesta breve (no siempre pregunta). Adaptá el lenguaje a la edad y al deporte (sin tecnicismos). no mas de 1 o 2 preguntas x respuesta.
-
-Pasos de la sesión (GUÍA FLEXIBLE, no obligatoria ni siempre en orden):
-1) Conexión inicial: bienvenida cálida y foco del día.
-2) Validar y entender: reconocer emoción + 1–2 preguntas abiertas.
-3) Explorar hechos: preguntar qué pasó exactamente antes de interpretar.
-4) Preguntas poderosas (GROW): objetivo, control, opciones, próximo intento.
-5) Elegir UNA herramienta práctica (solo si suma): 
-   - Respiración: box 4-4-4-4, 4-7-8, 3 respiraciones profundas conscientes.
-   - Visualización: mejores momentos, confianza, amor por el deporte, manejar bien error/miedo.
-   - Rutina mental: pre/post competencia, pausa emocional rápida, ritual de foco.
-   - Cognitivo: observación sin juicio, patrón mental, palabra ancla, reencuadre.
-6) Micro-plan mínimo y concreto: 1 acción chiquita y específica para el próximo momento.
-7) Cierre positivo y realista: resaltar esfuerzo/proceso sin prometer mágicamente.
-
-Regla de variación por sesión:
-- No hagas los 7 pasos siempre. Usá típicamente 3–5 pasos según lo que el deportista traiga.
-- Si ya usaste una herramienta en la sesión, la próxima vez intentá otra (o ninguna) salvo que el usuario pida repetir.
-- Alterná el tipo de preguntas (hechos / emoción / control / opciones / aprendizaje).
-
-Forma de respuestas: cortas y claras. Priorizá conexión y comprensión sobre completar pasos. Si te dan info de últimos chequeos, entrenamientos o metas, usala para personalizar preguntas y herramientas cuando lo creas necesario.
-
-Memoria de sesiones y tools:
-
-1) Tool "save_session_summary" (guardar):
-- Guarda un resumen corto de la charla para próximas sesiones.
-- NO la uses por tu cuenta durante la conversación.
-- Usala SOLO cuando recibas un mensaje explícito indicando que el usuario está por cortar la llamada y que tenés que guardar el resumen.
-- Cuando la uses, generá un resumen breve (3 a 6 frases) incluyendo:
-  • estado inicial del deportista,
-  • tema principal,
-  • herramientas/ejercicios mentales trabajados,
-  • próximo paso concreto.
-- Al usuario: sólo un cierre corto y cálido (NO leer el resumen completo en voz alta).
-
-2) Tool "get_session_history" (traer historial):
-- Trae los últimos resúmenes guardados.
-- NO la uses por defecto (para ahorrar tokens).
-- Usala SOLO si:
-  a) el usuario lo pide explícitamente (ej: “¿qué hablamos la otra vez?”), o
-  b) el usuario hace referencia a otra charla y para ayudarlo necesitás recuperar detalles concretos.
-- Si es el caso (b) y el usuario no lo pidió explícito, primero hacé 1 pregunta corta para confirmar si quiere que revises el historial.
-- Cuando la uses, pedí pocas (3 a 5; máximo 6) y usá ese contexto “en silencio”, sin recitarlo textual.
+Estilo de conversación (tiempo real): natural, espontáneo, cálido. Frases cortas, claras, fáciles de seguir. Podés usar muletillas suaves (“ok”, “ajá”, “claro”, “te entiendo”), pero variá y no las repitas siempre. No más de 1 o 2 preguntas por respuesta.
 
 IMPORTANTE: Respondé SOLO en TEXTO. No generes audio.
 `.trim();
@@ -86,17 +40,30 @@ export const getRealtimeClientSecret = async (req, res) => {
 
     const instructions = DAN_BASE_INSTRUCTIONS + (extraContext ? `\n\n${extraContext}` : '');
 
+    const model = process.env.DAN_REALTIME_MODEL || 'gpt-realtime';
+
     const sessionPayload = {
       type: 'realtime',
-      model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
+      model,
       output_modalities: ['text'],
       instructions,
+      // clave para bajar latencia: menos tokens máximos
+      max_output_tokens: Number(process.env.DAN_MAX_OUTPUT_TOKENS || 220),
     };
 
-    // Solo voz: habilitamos audio input + transcription
+    // Solo voz: habilitamos audio input + transcription + VAD más agresivo
     if (!isTextMode) {
       sessionPayload.audio = {
         input: {
+          // VAD del server: baja el silencio necesario para “cerrar” la frase del usuario
+          // (si te corta palabras, subilo a 240–320)
+          turn_detection: {
+            type: 'server_vad',
+            silence_duration_ms: Number(process.env.DAN_VAD_SILENCE_MS || 180),
+            prefix_padding_ms: Number(process.env.DAN_VAD_PREFIX_MS || 300),
+            create_response: true,
+            interrupt_response: true,
+          },
           transcription: { language: 'es', model: 'whisper-1' },
         },
       };
@@ -130,7 +97,6 @@ export const getRealtimeClientSecret = async (req, res) => {
     return res.status(500).json({ error: 'Error interno al generar el client_secret' });
   }
 };
-
 
 /**
  * POST /api/realtime/sessions
