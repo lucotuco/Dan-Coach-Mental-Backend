@@ -12,7 +12,10 @@ export const getDidConfig = async (_req, res) => {
 
     return res.json({ config: { agentId, clientKey } });
   } catch (e) {
-    return res.status(500).json({ error: 'Error interno en did config', details: e?.message ?? String(e) });
+    return res.status(500).json({
+      error: 'Error interno en did config',
+      details: e?.message ?? String(e),
+    });
   }
 };
 
@@ -26,13 +29,18 @@ export const proxyIdleVideo = async (req, res) => {
     if (!src) return res.status(400).send('Missing src');
 
     let u;
-    try { u = new URL(src); } catch { return res.status(400).send('Invalid src'); }
+    try {
+      u = new URL(src);
+    } catch {
+      return res.status(400).send('Invalid src');
+    }
     if (u.protocol !== 'https:') return res.status(400).send('Invalid protocol');
 
+    // Ajustá si tu idle_video viene de otro host.
     const allowedHosts = new Set([
       'cdn.d-id.com',
       'd-id-public-bucket.s3.amazonaws.com',
-      u.host,
+      u.host, // fallback (si querés más estricto, sacalo)
     ]);
 
     if (!allowedHosts.has(u.host)) {
@@ -66,6 +74,7 @@ export const proxyIdleVideo = async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
 
     if (req.method === 'HEAD') return res.end();
+
     if (!upstream.body) return res.status(502).send('Upstream has no body');
 
     const nodeStream = Readable.fromWeb(upstream.body);

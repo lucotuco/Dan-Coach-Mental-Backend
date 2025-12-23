@@ -2,10 +2,17 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { Agent } from 'undici';
 
 const TTS_DIR = path.join(process.cwd(), 'storage', 'tts');
 
-// Tu lista “real” (10)
+// Keep-alive para reducir latencia de llamadas repetidas a OpenAI
+const OPENAI_DISPATCHER = new Agent({
+  connections: 50,
+  keepAliveTimeout: 10_000,
+  keepAliveMaxTimeout: 60_000,
+});
+
 const ALLOWED_TTS_VOICES = new Set([
   'alloy',
   'ash',
@@ -13,10 +20,14 @@ const ALLOWED_TTS_VOICES = new Set([
   'coral',
   'echo',
   'fable',
-  'nova',
   'onyx',
+  'nova',
   'sage',
   'shimmer',
+  // extras (si los usás)
+  'verse',
+  'marin',
+  'cedar',
 ]);
 
 async function ensureDir() {
@@ -26,6 +37,7 @@ async function ensureDir() {
 function getPublicBaseUrl(req) {
   const envBase = process.env.PUBLIC_BASE_URL;
   if (envBase) return envBase.replace(/\/+$/, '');
+
   const proto = req.headers['x-forwarded-proto'] || req.protocol;
   return `${proto}://${req.get('host')}`;
 }
@@ -36,23 +48,30 @@ function pickVoice(requested, fallback) {
   return fallback;
 }
 
-function assertFetch() {
-  if (typeof globalThis.fetch !== 'function') {
-    throw new Error(
-      'Este servidor no tiene fetch global. Usá Node 18+ (recomendado) o agregá un polyfill.',
-    );
-  }
+function isMiniTtsModel(model) {
+  return typeof model === 'string' && model.startsWith('gpt-4o-mini-tts');
+}
+
+function safeResponseFormat(fmt) {
+  const f = (fmt || '').toString().trim().toLowerCase();
+  const allowed = new Set(['mp3', 'opus', 'aac', 'flac', 'wav', 'pcm']);
+  return allowed.has(f) ? f : 'mp3';
 }
 
 /**
  * POST /api/tts
- * Body: { text, voice?, model?, instructions?, speed?, response_format? }
- * Devuelve: { audioUrl }
+ * Body: {
+ *   text: string,
+ *   voice?: string,
+ *   model?: string,
+ *   instructions?: string,
+ *   speed?: number,
+ *   response_format?: "mp3"|"opus"|"aac"|"flac"|"wav"|"pcm"
+ * }
+ * Devuelve: { audioUrl: string }
  */
 export const createTtsAudio = async (req, res) => {
   try {
-    assertFetch();
-
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'OPENAI_API_KEY faltante' });
 
@@ -61,7 +80,6 @@ export const createTtsAudio = async (req, res) => {
 
     await ensureDir();
 
-    // rápido y con instrucciones (si tu cuenta lo soporta)
     const model = (req.body?.model ?? process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts')
       .toString()
       .trim();
@@ -69,16 +87,14 @@ export const createTtsAudio = async (req, res) => {
     const defaultVoice = (process.env.OPENAI_TTS_VOICE ?? 'onyx').toString().trim();
     const voice = pickVoice(req.body?.voice, defaultVoice);
 
-    const instructions = (req.body?.instructions ?? process.env.OPENAI_TTS_INSTRUCTIONS ?? '')
-      .toString()
-      .trim();
+    const instructionsRaw =
+      (req.body?.instructions ?? process.env.OPENAI_TTS_INSTRUCTIONS ?? '').toString().trim();
 
     const speedNum = Number(req.body?.speed);
     const speed =
       Number.isFinite(speedNum) && speedNum >= 0.25 && speedNum <= 4.0 ? speedNum : undefined;
 
-    // Para D-ID: mp3 estable
-    const response_format = 'mp3';
+    const response_format = safeResponseFormat(req.body?.response_format ?? 'mp3');
 
     const payload = {
       model,
@@ -86,11 +102,12 @@ export const createTtsAudio = async (req, res) => {
       input: text,
       response_format,
       ...(speed ? { speed } : {}),
-      ...(instructions ? { instructions } : {}),
+      ...(isMiniTtsModel(model) && instructionsRaw ? { instructions: instructionsRaw } : {}),
     };
 
     const r = await fetch('https://api.openai.com/v1/audio/speech', {
       method: 'POST',
+      dispatcher: OPENAI_DISPATCHER,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
@@ -108,10 +125,12 @@ export const createTtsAudio = async (req, res) => {
     const buf = Buffer.from(arrayBuf);
 
     if (!buf || buf.length < 800) {
-      return res.status(500).json({ error: 'TTS devolvió audio inválido (muy chico)' });
+      return res.status(500).json({ error: 'TTS devolvió un audio inválido (muy chico)' });
     }
 
-    const fileName = `${randomUUID()}.mp3`;
+    // Para D-ID, mp3 es lo más práctico. Igual guardamos según response_format.
+    const ext = response_format === 'pcm' ? 'pcm' : response_format;
+    const fileName = `${randomUUID()}.${ext}`;
     const filePath = path.join(TTS_DIR, fileName);
     await fs.writeFile(filePath, buf);
 
@@ -121,29 +140,34 @@ export const createTtsAudio = async (req, res) => {
     return res.json({ audioUrl });
   } catch (err) {
     console.error('createTtsAudio error:', err);
-    return res.status(500).json({ error: 'Error interno creando TTS', details: err?.message ?? String(err) });
+    return res.status(500).json({ error: 'Error interno creando TTS' });
   }
 };
 
 /**
  * GET/HEAD /api/tts/:file
- * Público para D-ID.
+ * Público (sin auth) para que D-ID pueda descargar/validar el audio.
  */
 export const serveTtsAudio = async (req, res) => {
   try {
     const file = (req.params.file ?? '').toString();
     const safe = path.basename(file);
 
-    if (!safe.endsWith('.mp3')) {
+    const allowedExt = ['.mp3', '.wav', '.aac', '.opus', '.flac', '.pcm'];
+    if (!allowedExt.some((e) => safe.endsWith(e))) {
       return res.status(400).json({ error: 'Formato inválido' });
     }
 
     const filePath = path.join(TTS_DIR, safe);
 
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Content-Type', 'audio/mpeg');
+    // content-type mínimo (si querés exactitud por ext, se puede mapear)
+    res.setHeader('Content-Type', safe.endsWith('.mp3') ? 'audio/mpeg' : 'application/octet-stream');
     res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+
+    // En producción podés dejarlo largo; en dev conviene no cachear para evitar “audio viejo”.
+    const isProd = process.env.NODE_ENV === 'production';
+    res.setHeader('Cache-Control', isProd ? 'public, max-age=31536000, immutable' : 'no-store');
 
     return res.sendFile(filePath);
   } catch (err) {
