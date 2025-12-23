@@ -17,7 +17,7 @@ IMPORTANTE: Respondé SOLO en TEXTO. No generes audio.
 export const getRealtimeClientSecret = async (req, res) => {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: 'OPENAI_API_KEY no configurada' });
+    if (!apiKey) return res.status(500).json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
 
     const userId = req.query.userId;
     const mode = (req.query.mode || 'voice').toString(); // 'voice' | 'text'
@@ -28,7 +28,7 @@ export const getRealtimeClientSecret = async (req, res) => {
       try {
         extraContext = await buildCoachContext(userId);
       } catch (err) {
-        console.error('Error armando contexto:', err);
+        console.error('Error armando contexto de coach:', err);
       }
     }
 
@@ -39,20 +39,24 @@ export const getRealtimeClientSecret = async (req, res) => {
       model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
       output_modalities: ['text'],
       instructions,
-
-      // VAD más rápido => menos “delay” entre que el usuario termina y la respuesta arranca
-      // (campos documentados) :contentReference[oaicite:3]{index=3}
-      turn_detection: {
-        type: 'server_vad',
-        silence_duration_ms: 250,
-        prefix_padding_ms: 120,
-      },
     };
 
+    // Si el modo es voz, habilitás audio input + transcription + VAD
     if (!isTextMode) {
       sessionPayload.audio = {
         input: {
           transcription: { language: 'es', model: 'whisper-1' },
+
+          // ✅ ACÁ va turn_detection (NO en session.turn_detection)
+          turn_detection: {
+            type: 'server_vad',
+            // opcionales (ajustables)
+            threshold: 0.5,
+            prefix_padding_ms: 300,
+            silence_duration_ms: 200,
+            create_response: true,
+            interrupt_response: true,
+          },
         },
       };
     }
@@ -71,15 +75,15 @@ export const getRealtimeClientSecret = async (req, res) => {
 
     if (!response.ok) {
       const text = await response.text();
-      console.error('OpenAI client_secrets error:', text);
-      return res.status(500).json({ error: 'No se pudo crear client_secret', details: text });
+      console.error('Error OpenAI client_secrets:', text);
+      return res.status(500).json({ error: 'No se pudo crear el client_secret de Realtime', details: text });
     }
 
     const clientSecret = await response.json();
     return res.json(clientSecret);
   } catch (err) {
-    console.error('getRealtimeClientSecret error:', err);
-    return res.status(500).json({ error: 'Error interno', details: err?.message ?? String(err) });
+    console.error('Error en getRealtimeClientSecret:', err);
+    return res.status(500).json({ error: 'Error interno al generar el client_secret' });
   }
 };
 
