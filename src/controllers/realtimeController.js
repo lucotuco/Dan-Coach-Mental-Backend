@@ -67,11 +67,15 @@ IMPORTANTE: Respondé SOLO en TEXTO. No generes audio.
 export const getRealtimeClientSecret = async (req, res) => {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
+    if (!apiKey) {
+      return res.status(500).json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
+    }
 
     const userId = req.query.userId;
-    let extraContext = '';
+    const mode = (req.query.mode || 'voice').toString(); // 'voice' | 'text'
+    const isTextMode = mode === 'text';
 
+    let extraContext = '';
     if (userId) {
       try {
         extraContext = await buildCoachContext(userId);
@@ -82,6 +86,22 @@ export const getRealtimeClientSecret = async (req, res) => {
 
     const instructions = DAN_BASE_INSTRUCTIONS + (extraContext ? `\n\n${extraContext}` : '');
 
+    const sessionPayload = {
+      type: 'realtime',
+      model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
+      output_modalities: ['text'],
+      instructions,
+    };
+
+    // Solo voz: habilitamos audio input + transcription
+    if (!isTextMode) {
+      sessionPayload.audio = {
+        input: {
+          transcription: { language: 'es', model: 'whisper-1' },
+        },
+      };
+    }
+
     const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
       method: 'POST',
       headers: {
@@ -90,32 +110,17 @@ export const getRealtimeClientSecret = async (req, res) => {
       },
       body: JSON.stringify({
         expires_after: { anchor: 'created_at', seconds: 600 },
-        session: {
-          type: 'realtime',
-          model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
-
-          // BACK: pedimos solo texto
-          output_modalities: ['text'],
-
-          instructions,
-
-          // Mantenemos mic + transcripción del usuario (pero sin audio output)
-          audio: {
-            input: {
-              transcription: { language: 'es', model: 'whisper-1' },
-              // Si vos ya seteás server_vad desde otro lado, dejalo como está.
-              // Si no, podés configurar turn_detection acá.
-              // turn_detection: { type: 'server_vad' }
-            },
-          },
-        },
+        session: sessionPayload,
       }),
     });
 
     if (!response.ok) {
       const text = await response.text();
       console.error('Error OpenAI client_secrets:', text);
-      return res.status(500).json({ error: 'No se pudo crear el client_secret de Realtime', details: text });
+      return res.status(500).json({
+        error: 'No se pudo crear el client_secret de Realtime',
+        details: text,
+      });
     }
 
     const clientSecret = await response.json();
@@ -125,6 +130,7 @@ export const getRealtimeClientSecret = async (req, res) => {
     return res.status(500).json({ error: 'Error interno al generar el client_secret' });
   }
 };
+
 
 /**
  * POST /api/realtime/sessions
