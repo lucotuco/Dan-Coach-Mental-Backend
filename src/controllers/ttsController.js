@@ -2,17 +2,10 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { Agent } from 'undici';
 
 const TTS_DIR = path.join(process.cwd(), 'storage', 'tts');
 
-// Keep-alive para reducir latencia de llamadas repetidas a OpenAI
-const OPENAI_DISPATCHER = new Agent({
-  connections: 50,
-  keepAliveTimeout: 10_000,
-  keepAliveMaxTimeout: 60_000,
-});
-
+// Voces built-in soportadas por /v1/audio/speech (según doc actual)
 const ALLOWED_TTS_VOICES = new Set([
   'alloy',
   'ash',
@@ -24,7 +17,6 @@ const ALLOWED_TTS_VOICES = new Set([
   'nova',
   'sage',
   'shimmer',
-  // extras (si los usás)
   'verse',
   'marin',
   'cedar',
@@ -35,6 +27,7 @@ async function ensureDir() {
 }
 
 function getPublicBaseUrl(req) {
+  // Debe ser accesible públicamente por D-ID (HTTPS).
   const envBase = process.env.PUBLIC_BASE_URL;
   if (envBase) return envBase.replace(/\/+$/, '');
 
@@ -50,12 +43,6 @@ function pickVoice(requested, fallback) {
 
 function isMiniTtsModel(model) {
   return typeof model === 'string' && model.startsWith('gpt-4o-mini-tts');
-}
-
-function safeResponseFormat(fmt) {
-  const f = (fmt || '').toString().trim().toLowerCase();
-  const allowed = new Set(['mp3', 'opus', 'aac', 'flac', 'wav', 'pcm']);
-  return allowed.has(f) ? f : 'mp3';
 }
 
 /**
@@ -80,13 +67,18 @@ export const createTtsAudio = async (req, res) => {
 
     await ensureDir();
 
+    // Modelo por defecto: gpt-4o-mini-tts (necesario si querés usar `instructions`)
+    // Modelos válidos: tts-1, tts-1-hd, gpt-4o-mini-tts, gpt-4o-mini-tts-2025-12-15
     const model = (req.body?.model ?? process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts')
       .toString()
       .trim();
 
-    const defaultVoice = (process.env.OPENAI_TTS_VOICE ?? 'onyx').toString().trim();
+    // Voice por defecto: verse
+    const defaultVoice = (process.env.OPENAI_TTS_VOICE ?? 'verse').toString().trim();
     const voice = pickVoice(req.body?.voice, defaultVoice);
 
+    // `instructions` controla la voz, pero NO funciona con tts-1/tts-1-hd
+    // (solo lo mandamos si es gpt-4o-mini-tts*)
     const instructionsRaw =
       (req.body?.instructions ?? process.env.OPENAI_TTS_INSTRUCTIONS ?? '').toString().trim();
 
@@ -94,20 +86,19 @@ export const createTtsAudio = async (req, res) => {
     const speed =
       Number.isFinite(speedNum) && speedNum >= 0.25 && speedNum <= 4.0 ? speedNum : undefined;
 
-    const response_format = safeResponseFormat(req.body?.response_format ?? 'mp3');
+    const response_format = (req.body?.response_format ?? 'mp3').toString().trim();
 
     const payload = {
       model,
       voice,
       input: text,
-      response_format,
+      response_format, // spec actual del endpoint
       ...(speed ? { speed } : {}),
       ...(isMiniTtsModel(model) && instructionsRaw ? { instructions: instructionsRaw } : {}),
     };
 
     const r = await fetch('https://api.openai.com/v1/audio/speech', {
       method: 'POST',
-      dispatcher: OPENAI_DISPATCHER,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
@@ -124,13 +115,12 @@ export const createTtsAudio = async (req, res) => {
     const arrayBuf = await r.arrayBuffer();
     const buf = Buffer.from(arrayBuf);
 
+    // Sanity check mínimo
     if (!buf || buf.length < 800) {
       return res.status(500).json({ error: 'TTS devolvió un audio inválido (muy chico)' });
     }
 
-    // Para D-ID, mp3 es lo más práctico. Igual guardamos según response_format.
-    const ext = response_format === 'pcm' ? 'pcm' : response_format;
-    const fileName = `${randomUUID()}.${ext}`;
+    const fileName = `${randomUUID()}.mp3`;
     const filePath = path.join(TTS_DIR, fileName);
     await fs.writeFile(filePath, buf);
 
@@ -146,28 +136,23 @@ export const createTtsAudio = async (req, res) => {
 
 /**
  * GET/HEAD /api/tts/:file
- * Público (sin auth) para que D-ID pueda descargar/validar el audio.
+ * Público (sin auth) para que D-ID pueda descargar/validar el mp3.
  */
 export const serveTtsAudio = async (req, res) => {
   try {
     const file = (req.params.file ?? '').toString();
     const safe = path.basename(file);
 
-    const allowedExt = ['.mp3', '.wav', '.aac', '.opus', '.flac', '.pcm'];
-    if (!allowedExt.some((e) => safe.endsWith(e))) {
+    if (!safe.endsWith('.mp3')) {
       return res.status(400).json({ error: 'Formato inválido' });
     }
 
     const filePath = path.join(TTS_DIR, safe);
 
     res.setHeader('Access-Control-Allow-Origin', '*');
-    // content-type mínimo (si querés exactitud por ext, se puede mapear)
-    res.setHeader('Content-Type', safe.endsWith('.mp3') ? 'audio/mpeg' : 'application/octet-stream');
+    res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Accept-Ranges', 'bytes');
-
-    // En producción podés dejarlo largo; en dev conviene no cachear para evitar “audio viejo”.
-    const isProd = process.env.NODE_ENV === 'production';
-    res.setHeader('Cache-Control', isProd ? 'public, max-age=31536000, immutable' : 'no-store');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
 
     return res.sendFile(filePath);
   } catch (err) {
