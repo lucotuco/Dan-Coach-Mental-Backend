@@ -70,8 +70,9 @@ export const getRealtimeClientSecret = async (req, res) => {
     if (!apiKey) return res.status(500).json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
 
     const userId = req.query.userId;
-    let extraContext = '';
+    const mode = (req.query.mode === 'audio' ? 'audio' : 'text'); // default text
 
+    let extraContext = '';
     if (userId) {
       try {
         extraContext = await buildCoachContext(userId);
@@ -82,6 +83,29 @@ export const getRealtimeClientSecret = async (req, res) => {
 
     const instructions = DAN_BASE_INSTRUCTIONS + (extraContext ? `\n\n${extraContext}` : '');
 
+    const sessionPayload = {
+      type: 'realtime',
+      model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
+
+      // ✅ “uno u otro”: arrancamos en text o audio según mode
+      output_modalities: [mode],
+
+      instructions,
+
+      // Mantengo transcripción del user (si el cliente manda audio)
+      audio: {
+        input: {
+          transcription: { language: 'es', model: 'whisper-1' },
+        },
+      },
+    };
+
+    // ✅ Solo si estás en modo audio, seteamos una voz para la salida
+    // (la voz queda “lockeada” luego de la primer respuesta con audio). :contentReference[oaicite:4]{index=4}
+    if (mode === 'audio') {
+      sessionPayload.voice = process.env.DAN_REALTIME_VOICE || 'verse';
+    }
+
     const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
       method: 'POST',
       headers: {
@@ -90,25 +114,7 @@ export const getRealtimeClientSecret = async (req, res) => {
       },
       body: JSON.stringify({
         expires_after: { anchor: 'created_at', seconds: 600 },
-        session: {
-          type: 'realtime',
-          model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
-
-          // BACK: pedimos solo texto
-          output_modalities: ['text'],
-
-          instructions,
-
-          // Mantenemos mic + transcripción del usuario (pero sin audio output)
-          audio: {
-            input: {
-              transcription: { language: 'es', model: 'whisper-1' },
-              // Si vos ya seteás server_vad desde otro lado, dejalo como está.
-              // Si no, podés configurar turn_detection acá.
-              // turn_detection: { type: 'server_vad' }
-            },
-          },
-        },
+        session: sessionPayload,
       }),
     });
 
