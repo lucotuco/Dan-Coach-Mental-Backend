@@ -90,22 +90,17 @@ export const getRealtimeClientSecret = async (req, res) => {
       model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
       output_modalities: [outputModality],
       instructions,
-      ...(outputModality === 'audio'
-        ? {
-            // Transcripción del input del usuario (audio) en modo audio
-            audio: {
-              input: {
-                transcription: { language: 'es', model: 'whisper-1' },
-                // turn_detection: { type: 'server_vad' },
-              },
-              output:{
-                voice:'verse'
-              }
+      
+          // Transcripción del input del usuario (audio) en modo audio
+          audio: {
+            input: {
+              transcription: { language: 'es', model: 'whisper-1' },
+              // turn_detection: { type: 'server_vad' },
             },
-          }
-        : {}),
-      // tools/tool_choice pueden setearse por el cliente (Agents lib) vía session.update;
-      // la API soporta tools y tool_choice en la sesión. :contentReference[oaicite:1]{index=1}
+            output: {
+              voice: 'verse'
+            }
+          },
     };
 
     const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
