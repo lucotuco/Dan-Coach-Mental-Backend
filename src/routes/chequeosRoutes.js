@@ -1,13 +1,24 @@
+// src/routes/realtimeRoutes.js
 import { Router } from 'express';
-import multer from 'multer';
-import { createCheck, listChecksByTypeAndOwner } from '../controllers/chequeosController.js';
+import {
+  getRealtimeClientSecret,
+  saveRealtimeSessionSummary,
+  getRealtimeSessions,
+  getRealtimeCheckups,
+} from '../controllers/realtimeController.js';
 
 const router = Router();
 
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
+// GET /api/realtime/client-secret?mode=text|audio
+router.get('/client-secret', getRealtimeClientSecret);
 
-router.get('/', listChecksByTypeAndOwner);
-router.post('/', upload.single('audio'), createCheck);
+// GET /api/realtime/sessions
+router.get('/sessions', getRealtimeSessions);
+
+// ✅ GET /api/realtime/checkups
+router.get('/checkups', getRealtimeCheckups);
+
+// POST /api/realtime/sessions
+router.post('/sessions', saveRealtimeSessionSummary);
 
 export default router;

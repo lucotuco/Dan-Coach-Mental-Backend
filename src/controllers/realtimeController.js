@@ -1,6 +1,7 @@
 // src/controllers/realtimeController.js
 import { buildCoachContext } from '../services/coachContext.js';
 import { CoachSession } from '../models/CoachSession.js';
+import { Chequeo } from '../models/Chequeo.js';
 
 const DAN_BASE_INSTRUCTIONS = `Sos DAN, coach mental deportivo virtual. Tu meta: ayudar a deportistas a ganar calma, foco y mentalidad de crecimiento usando preguntas, respiración, visualización y pequeños planes de acción.
 
@@ -21,7 +22,7 @@ Pasos de la sesión (GUÍA FLEXIBLE, no obligatoria ni siempre en orden):
 2) Validar y entender: reconocer emoción + 1–2 preguntas abiertas.
 3) Explorar hechos: preguntar qué pasó exactamente antes de interpretar.
 4) Preguntas poderosas (GROW): objetivo, control, opciones, próximo intento.
-5) Elegir UNA herramienta práctica (solo si suma): 
+5) Elegir UNA herramienta práctica (solo si suma):
    - Respiración: box 4-4-4-4, 4-7-8, 3 respiraciones profundas conscientes.
    - Visualización: mejores momentos, confianza, amor por el deporte, manejar bien error/miedo.
    - Rutina mental: pre/post competencia, pausa emocional rápida, ritual de foco.
@@ -36,43 +37,44 @@ Regla de variación por sesión:
 
 Forma de respuestas: cortas y claras. Priorizá conexión y comprensión sobre completar pasos. Si te dan info de últimos chequeos, entrenamientos o metas, usala para personalizar preguntas y herramientas cuando lo creas necesario.
 
-Memoria de sesiones y tools:
+TOOLS DISPONIBLES (podés decidir usarlas sin pedir confirmación):
+1) save_session_summary:
+- Guardá un resumen corto de la charla cuando recibas un mensaje explícito indicando que el usuario está por cortar.
+- Usala UNA sola vez. Resumen 3 a 6 frases + próximos pasos.
+- Al usuario: solo cierre corto y cálido.
 
-1) Tool "save_session_summary" (guardar):
-- Guarda un resumen corto de la charla para próximas sesiones.
-- NO la uses por tu cuenta durante la conversación.
-- Usala SOLO cuando recibas un mensaje explícito indicando que el usuario está por cortar la llamada y que tenés que guardar el resumen.
-- Cuando la uses, generá un resumen breve (3 a 6 frases) incluyendo:
-  • estado inicial del deportista,
-  • tema principal,
-  • herramientas/ejercicios mentales trabajados,
-  • próximo paso concreto.
-- Al usuario: sólo un cierre corto y cálido (NO leer el resumen completo en voz alta).
+2) get_recent_sessions:
+- Trae las últimas sesiones guardadas del usuario (resúmenes).
+- Podés usarla cuando aporte personalización real (ej: usuario menciona “la otra vez”, progreso, patrones, bloqueo recurrente).
+- No hace falta pedir permiso ni confirmación.
+- Usala con moderación (no en todos los mensajes).
 
-2) Tool "get_session_history" (traer historial):
-- Trae los últimos resúmenes guardados.
-- NO la uses por defecto (para ahorrar tokens).
-- Usala SOLO si:
-  a) el usuario lo pide explícitamente (ej: “¿qué hablamos la otra vez?”), o
-  b) el usuario hace referencia a otra charla y para ayudarlo necesitás recuperar detalles concretos.
-- Si es el caso (b) y el usuario no lo pidió explícito, primero hacé 1 pregunta corta para confirmar si quiere que revises el historial.
-- Cuando la uses, pedí pocas (3 a 5; máximo 6) y usá ese contexto “en silencio”, sin recitarlo textual.
+3) get_recent_checkups:
+- Trae los últimos chequeos del usuario.
+- Podés usarla cuando ayude a ajustar el enfoque (ej: estado emocional repetido, energía, motivación, sueño, estrés).
+- No hace falta pedir permiso ni confirmación.
+- Usala con moderación (no en todos los mensajes).
 
-IMPORTANTE: Respondé SOLO en TEXTO. No generes audio.
+IMPORTANTE:
+- Tu salida siempre es texto. Si la sesión está en modo audio, ese texto se convertirá en voz automáticamente.
 `.trim();
 
 /**
- * GET /api/realtime/client-secret
+ * GET /api/realtime/client-secret?mode=text|audio
  */
 export const getRealtimeClientSecret = async (req, res) => {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
+    if (!apiKey) {
+      return res.status(500).json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
+    }
 
     const userId = req.query.userId;
-    const mode = (req.query.mode === 'audio' ? 'audio' : 'text'); // default text
+    const mode = (req.query.mode ?? 'text').toString().toLowerCase();
+    const outputModality = mode === 'audio' ? 'audio' : 'text';
 
     let extraContext = '';
+
     if (userId) {
       try {
         extraContext = await buildCoachContext(userId);
@@ -86,28 +88,24 @@ export const getRealtimeClientSecret = async (req, res) => {
     const sessionPayload = {
       type: 'realtime',
       model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
-
-      // ✅ “uno u otro”: arrancamos en text o audio según mode
-      output_modalities: [mode],
-
+      output_modalities: [outputModality],
       instructions,
-
-      // Mantengo transcripción del user (si el cliente manda audio)
-      audio: {
-        input: {
-          transcription: { language: 'es', model: 'whisper-1' },
-        },
-        output: {
-          voice:'verse'
-        }
-      },
+      ...(outputModality === 'audio'
+        ? {
+            // Voz del output de Realtime (si tu modelo/stack la respeta)
+            voice: process.env.DAN_REALTIME_VOICE || 'verse',
+            // Transcripción del input del usuario (audio) en modo audio
+            audio: {
+              input: {
+                transcription: { language: 'es', model: 'whisper-1' },
+                // turn_detection: { type: 'server_vad' },
+              },
+            },
+          }
+        : {}),
+      // tools/tool_choice pueden setearse por el cliente (Agents lib) vía session.update;
+      // la API soporta tools y tool_choice en la sesión. :contentReference[oaicite:1]{index=1}
     };
-
-    // ✅ Solo si estás en modo audio, seteamos una voz para la salida
-    // (la voz queda “lockeada” luego de la primer respuesta con audio). :contentReference[oaicite:4]{index=4}
-   /* if (mode === 'audio') {
-      sessionPayload.voice = process.env.DAN_REALTIME_VOICE || 'verse';
-    }*/
 
     const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
       method: 'POST',
@@ -124,7 +122,10 @@ export const getRealtimeClientSecret = async (req, res) => {
     if (!response.ok) {
       const text = await response.text();
       console.error('Error OpenAI client_secrets:', text);
-      return res.status(500).json({ error: 'No se pudo crear el client_secret de Realtime', details: text });
+      return res.status(500).json({
+        error: 'No se pudo crear el client_secret de Realtime',
+        details: text,
+      });
     }
 
     const clientSecret = await response.json();
@@ -164,6 +165,7 @@ export const saveRealtimeSessionSummary = async (req, res) => {
 
 /**
  * GET /api/realtime/sessions
+ * - format=tool => devuelve { ok, context } listo para tool
  */
 export const getRealtimeSessions = async (req, res) => {
   try {
@@ -182,18 +184,74 @@ export const getRealtimeSessions = async (req, res) => {
       const context = sessions
         .map((s, i) => {
           const date = s.createdAt ? new Date(s.createdAt).toISOString().slice(0, 10) : 's/f';
-          const resumen = (s.resumen ?? '').toString().slice(0, 220);
-          const paso = (s.proximoPaso ?? '').toString().slice(0, 120);
-          return `#${i + 1} (${date}) ${resumen}${paso ? ` | Próximo paso: ${paso}` : ''}`;
+          const resumen = (s.resumen ?? '').toString().slice(0, 260);
+          const paso = (s.proximoPaso ?? '').toString().slice(0, 140);
+          const puntos =
+            Array.isArray(s.puntosClave) && s.puntosClave.length
+              ? ` | Claves: ${s.puntosClave.slice(0, 3).join(' / ')}`
+              : '';
+          return `#${i + 1} (${date}) ${resumen}${puntos}${paso ? ` | Próximo paso: ${paso}` : ''}`;
         })
         .join('\n');
 
-      return res.json({ ok: true, context });
+      return res.json({ ok: true, context: context || 'Sin sesiones previas.' });
     }
 
     return res.json({ ok: true, sessions });
   } catch (err) {
     console.error('Error obteniendo sesiones realtime:', err);
     return res.status(500).json({ message: 'Error interno al obtener sesiones realtime' });
+  }
+};
+
+/**
+ * ✅ GET /api/realtime/checkups
+ * - format=tool => devuelve { ok, context } listo para tool
+ */
+export const getRealtimeCheckups = async (req, res) => {
+  try {
+    const { userId, format } = req.query;
+    const limit = Math.min(Math.max(parseInt(req.query.limit ?? '5', 10), 1), 10);
+
+    if (!userId) return res.status(400).json({ message: 'Falta userId en el query' });
+
+    const checkups = await Chequeo.find({ owner: userId })
+      .sort({ fecha: -1 })
+      .limit(limit)
+      .select('fecha tipo variable1 variable2 variable3 variable4 variable5 variable6 variable7 audio')
+      .lean();
+
+    if (format === 'tool') {
+      const context = checkups
+        .map((ch, i) => {
+          const date = ch.fecha ? new Date(ch.fecha).toISOString().slice(0, 10) : 's/f';
+          const vars = [
+            ch.variable1 != null && `v1=${ch.variable1}`,
+            ch.variable2 != null && `v2=${ch.variable2}`,
+            ch.variable3 != null && `v3=${ch.variable3}`,
+            ch.variable4 != null && `v4=${ch.variable4}`,
+            ch.variable5 != null && `v5=${ch.variable5}`,
+            ch.variable6 != null && `v6=${ch.variable6}`,
+            ch.variable7 != null && `v7=${ch.variable7}`,
+          ]
+            .filter(Boolean)
+            .join(', ');
+
+          const audioSummary = ch.audio?.summary ? ` | audio: ${(ch.audio.summary + '').slice(0, 120)}` : '';
+          const audioTags = Array.isArray(ch.audio?.tags) && ch.audio.tags.length
+            ? ` | tags: ${ch.audio.tags.slice(0, 6).join(', ')}`
+            : '';
+
+          return `#${i + 1} (${date}) tipo=${ch.tipo ?? 's/tipo'}${vars ? ` | ${vars}` : ''}${audioSummary}${audioTags}`;
+        })
+        .join('\n');
+
+      return res.json({ ok: true, context: context || 'Sin chequeos previos.' });
+    }
+
+    return res.json({ ok: true, checkups });
+  } catch (err) {
+    console.error('Error obteniendo chequeos realtime:', err);
+    return res.status(500).json({ message: 'Error interno al obtener chequeos realtime' });
   }
 };
