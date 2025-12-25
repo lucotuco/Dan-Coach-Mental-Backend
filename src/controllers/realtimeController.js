@@ -92,14 +92,15 @@ export const getRealtimeClientSecret = async (req, res) => {
       instructions,
       ...(outputModality === 'audio'
         ? {
-            // Voz del output de Realtime (si tu modelo/stack la respeta)
-            voice: process.env.DAN_REALTIME_VOICE || 'verse',
             // Transcripción del input del usuario (audio) en modo audio
             audio: {
               input: {
                 transcription: { language: 'es', model: 'whisper-1' },
                 // turn_detection: { type: 'server_vad' },
               },
+              output:{
+                voice:'verse'
+              }
             },
           }
         : {}),
