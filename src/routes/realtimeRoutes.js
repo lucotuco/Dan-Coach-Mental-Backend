@@ -1,15 +1,11 @@
 // src/routes/realtimeRoutes.js
-import { Router } from 'express';
-import {getRealtimeClientSecret,saveRealtimeSessionSummary,getRealtimeSessions} from '../controllers/realtimeController.js';
+import express from "express";
+import { createRealtimeClientSecret } from "../controllers/realtimeController.js";
+import { requireAuth } from "../middleware/requireAuth.js"; // asumido por tu proyecto
 
-const router = Router();
+const router = express.Router();
 
-// GET /api/realtime/client-secret
-router.get('/client-secret', getRealtimeClientSecret);
-
-router.get('/sessions', getRealtimeSessions)
-// POST /api/realtime/sessions
-// (la tool del agente llama acá para guardar el resumen)
-router.post('/sessions', saveRealtimeSessionSummary);
+// IMPORTANTE: mantené auth para que no cualquiera genere sessions con tu key
+router.post("/client-secret", requireAuth, createRealtimeClientSecret);
 
 export default router;
