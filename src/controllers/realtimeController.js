@@ -105,9 +105,9 @@ export const getRealtimeClientSecret = async (req, res) => {
 
     // ✅ Solo si estás en modo audio, seteamos una voz para la salida
     // (la voz queda “lockeada” luego de la primer respuesta con audio). :contentReference[oaicite:4]{index=4}
-    if (mode === 'audio') {
+   /* if (mode === 'audio') {
       sessionPayload.voice = process.env.DAN_REALTIME_VOICE || 'verse';
-    }
+    }*/
 
     const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
       method: 'POST',
