@@ -10,7 +10,7 @@ const ALLOWED_HOSTS = new Set([
 export async function getDidConfig(req, res) {
   // Ajustá estos nombres de env a los tuyos
   const agentId = process.env.DID_AGENT_ID || '';
-  const clientKey = process.env.DID_API_KEY || '';
+  const clientKey = process.env.DID_CLIENT_KEY || '';
 
   return res.json({
     agentId,
