@@ -1,61 +1,67 @@
 // src/controllers/didController.js
 import { Readable } from 'node:stream';
 
-export const getDidConfig = async (_req, res) => {
-  try {
-    const agentId = process.env.DID_AGENT_ID;
-    const clientKey = process.env.DID_CLIENT_KEY;
+const ALLOWED_HOSTS = new Set([
+  'agents-results.d-id.com',
+  'd-id-public-bucket.s3.amazonaws.com',
+  'cdn.d-id.com',
+]);
 
-    if (!agentId || !clientKey) {
-      return res.status(500).json({ error: 'DID_AGENT_ID o DID_CLIENT_KEY no configurados' });
+export async function getDidConfig(req, res) {
+  // Ajustá estos nombres de env a los tuyos
+  const agentId = process.env.DID_AGENT_ID || '';
+  const clientKey = process.env.DID_CLIENT_KEY || '';
+
+  return res.json({
+    agentId,
+    clientKey,
+  });
+}
+
+export async function proxyIdleVideo(req, res) {
+  try {
+    const rawUrl = req.query.url;
+    if (!rawUrl || typeof rawUrl !== 'string') {
+      return res.status(400).json({ error: 'Missing url' });
     }
 
-    return res.json({ config: { agentId, clientKey } });
-  } catch (e) {
-    return res.status(500).json({ error: 'Error interno en did config', details: e?.message ?? String(e) });
-  }
-};
+    let target;
+    try {
+      target = new URL(rawUrl);
+    } catch {
+      return res.status(400).json({ error: 'Invalid url' });
+    }
 
-/**
- * GET/HEAD /api/did/idle-video?src=https://....
- * Proxy para evitar CORS al reproducir idle_video en <video>.
- */
-export const proxyIdleVideo = async (req, res) => {
-  try {
-    const src = (req.query.src ?? '').toString().trim();
-    if (!src) return res.status(400).send('Missing src');
+    if (target.protocol !== 'https:') {
+      return res.status(400).json({ error: 'Only https is allowed' });
+    }
 
-    // Hardening mínimo: solo permitir https y dominios esperables
-    let u;
-    try { u = new URL(src); } catch { return res.status(400).send('Invalid src'); }
-    if (u.protocol !== 'https:') return res.status(400).send('Invalid protocol');
-
-    // Ajustá si tu idle_video viene de otro host, pero NO lo abras a cualquier dominio.
-    const allowedHosts = new Set([
-      'cdn.d-id.com',
-      'd-id-public-bucket.s3.amazonaws.com',
-      u.host, // fallback por si D-ID rota host; si querés más estricto, sacalo.
-    ]);
-
-    if (!allowedHosts.has(u.host)) {
-      return res.status(403).send('Host not allowed');
+    // Allowlist básico (evita proxy abierto)
+    if (!ALLOWED_HOSTS.has(target.hostname)) {
+      return res.status(403).json({ error: 'Host not allowed', host: target.hostname });
     }
 
     const range = req.headers.range;
 
-    const upstream = await fetch(src, {
-      method: req.method === 'HEAD' ? 'HEAD' : 'GET',
-      headers: range ? { Range: range } : {},
+    const upstream = await fetch(target.toString(), {
+      method: 'GET',
+      headers: {
+        ...(range ? { Range: range } : {}),
+        // ayuda a algunos CDNs
+        'User-Agent': 'dan-idle-proxy/1.0',
+      },
+      redirect: 'follow',
     });
 
-    // Pasar status y headers relevantes
+    // Copiar status (200 o 206)
     res.status(upstream.status);
 
+    // Copiar headers relevantes
     const passHeaders = [
       'content-type',
       'content-length',
-      'accept-ranges',
       'content-range',
+      'accept-ranges',
       'cache-control',
       'etag',
       'last-modified',
@@ -66,18 +72,31 @@ export const proxyIdleVideo = async (req, res) => {
       if (v) res.setHeader(h, v);
     }
 
-    // Importante para web
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // Si upstream no setea content-type, forzamos mp4
+    if (!res.getHeader('content-type')) {
+      res.setHeader('content-type', 'video/mp4');
+    }
 
-    if (req.method === 'HEAD') return res.end();
+    // CORS no es estrictamente necesario para playback, pero ayuda en dev
+    res.setHeader('access-control-allow-origin', '*');
+    res.setHeader('access-control-expose-headers', 'Content-Range, Accept-Ranges, Content-Length');
 
-    if (!upstream.body) return res.status(502).send('Upstream has no body');
+    if (!upstream.body) {
+      return res.end();
+    }
 
-    // Node 18+: convertir ReadableStream web -> Node stream
+    // Node fetch -> WebStream => convertir a Node stream
     const nodeStream = Readable.fromWeb(upstream.body);
+    nodeStream.on('error', (e) => {
+      console.error('[didController] proxy stream error', e);
+      try {
+        res.end();
+      } catch {}
+    });
+
     nodeStream.pipe(res);
   } catch (e) {
-    console.error('[DID][idle-video] proxy error:', e);
-    return res.status(500).send('Proxy error');
+    console.error('[didController] proxyIdleVideo error', e);
+    res.status(500).json({ error: 'Proxy failed' });
   }
-};
+}
