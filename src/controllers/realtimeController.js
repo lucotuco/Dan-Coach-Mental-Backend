@@ -61,44 +61,63 @@ IMPORTANTE:
 // src/controllers/realtimeController.js
 export async function createRealtimeClientSecret(req, res) {
   try {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return res.status(500).json({ message: 'OPENAI_API_KEY no configurado' });
+    const mode = (req.query.mode || "text").toLowerCase();
 
-    // Para tu caso: queremos texto (D-ID genera el audio)
-    const model = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime';
+    // En tu caso querés que el audio lo haga D-ID => OpenAI solo texto
+    const modalities = mode === "voice" ? ["text", "audio"] : ["text"];
 
-    // La sesión que queda embebida en el ephemeral key
-    const session = {
-      type: 'realtime',
+    const model = process.env.OPENAI_REALTIME_MODEL || "gpt-realtime";
+
+    // Podés inyectar tu DAN_BASE_INSTRUCTIONS / buildCoachContext acá si querés
+    const instructions =
+      DAN_BASE_INSTRUCTIONS||
+      `You are DAN, a sports mental coach. Keep responses concise, practical, and friendly.`;
+
+    const payload = {
       model,
-      modalities: ['text'],
-      instructions: DAN_BASE_INSTRUCTIONS,
+      modalities,
+      instructions,
+      // Si alguna vez querés audio desde OpenAI:
+      // audio: { voice: "alloy", format: "pcm16" },
     };
 
-    const r = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
-      method: 'POST',
+    const r = await fetch("https://api.openai.com/v1/realtime/sessions", {
+      method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify({ session }),
+      body: JSON.stringify(payload),
     });
+
+    const data = await r.json().catch(() => ({}));
 
     if (!r.ok) {
-      const text = await r.text();
-      return res.status(r.status).json({ message: 'OpenAI client_secrets error', details: text });
+      return res.status(r.status).json({
+        message: "Failed to create realtime session",
+        status: r.status,
+        error: data,
+      });
     }
 
-    const data = await r.json();
+    const clientSecret = data?.client_secret?.value;
+    if (!clientSecret) {
+      return res.status(500).json({
+        message: "OpenAI did not return client_secret.value",
+        raw: data,
+      });
+    }
 
-    // data.client_secret.value es el ephemeral key que usa el browser para /v1/realtime/calls
     return res.json({
-      value: data?.client_secret?.value,
-      expires_at: data?.client_secret?.expires_at,
-      model,
+      clientSecret,
+      model: data?.model || model,
+      modalities,
     });
-  } catch (e) {
-    return res.status(500).json({ message: 'Error creando client secret', error: String(e?.message || e) });
+  } catch (err) {
+    return res.status(500).json({
+      message: "Unexpected error creating realtime session",
+      error: String(err?.message || err),
+    });
   }
 }
 
