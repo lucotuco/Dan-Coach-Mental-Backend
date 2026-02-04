@@ -1,19 +1,53 @@
-import { saveSessionTranscript, createSessionSummary, updateUserProfileFromTranscript, createMemoryItemsFromSummary, refreshLongTermBriefIfNeeded, buildContextPack, } from '../services/memoryService.js';
+import {
+  saveSessionTranscript,
+  createSessionSummary,
+  updateUserProfileFromTranscript,
+  createMemoryItemsFromSummary,
+  refreshLongTermBriefIfNeeded,
+  buildContextPack,
+} from '../services/memoryService.js';
+
 import { getCachedMemory, setCachedMemory } from '../services/memoryCache.js';
+import crypto from 'crypto';
 
 const RETRIEVAL_CACHE_TTL_MS = parseInt(
   process.env.DAN_RETRIEVAL_CACHE_TTL_MS || '180000',
   10
 );
 
+function getAuthUserId(req) {
+  return (
+    req.user?.id ||
+    req.user?._id ||
+    req.user?.userId ||
+    req.user?.sub ||
+    null
+  );
+}
+
+function hashKey(input) {
+  return crypto.createHash('sha256').update(input).digest('hex');
+}
+
 export async function handleSessionEnd(req, res, next) {
   try {
-    const { userId, sessionId, transcript, metadata, forceLongTerm } =
+    const authUserId = getAuthUserId(req);
+    if (!authUserId) {
+      return res.status(401).json({ message: 'Token inválido o faltante.' });
+    }
+
+    const { userId: bodyUserId, sessionId, transcript, metadata, forceLongTerm } =
       req.body || {};
 
-    if (!userId || !sessionId || !transcript) {
+    if (bodyUserId && String(bodyUserId) !== String(authUserId)) {
+      return res.status(403).json({ message: 'userId no coincide con el token.' });
+    }
+
+    const userId = authUserId;
+
+    if (!sessionId || !transcript) {
       return res.status(400).json({
-        message: 'Faltan userId, sessionId o transcript en el body.',
+        message: 'Faltan sessionId o transcript en el body.',
       });
     }
 
@@ -54,21 +88,29 @@ export async function handleSessionEnd(req, res, next) {
 
 export async function handleContextPack(req, res, next) {
   try {
-    const { userId, messageText, metadata, tokenBudget, topK } = req.body || {};
-
-    if (!userId || !messageText) {
-      return res
-        .status(400)
-        .json({ message: 'Faltan userId o messageText en el body.' });
+    const authUserId = getAuthUserId(req);
+    if (!authUserId) {
+      return res.status(401).json({ message: 'Token inválido o faltante.' });
     }
 
-    const cacheKey = `${userId}:${messageText}:${JSON.stringify(
-      metadata || {}
-    )}`;
+    const { userId: bodyUserId, messageText, metadata, tokenBudget, topK } = req.body || {};
+
+    if (bodyUserId && String(bodyUserId) !== String(authUserId)) {
+      return res.status(403).json({ message: 'userId no coincide con el token.' });
+    }
+
+    const userId = authUserId;
+
+    if (!messageText) {
+      return res.status(400).json({ message: 'Falta messageText en el body.' });
+    }
+
+    // cache key estable y pequeño
+    const stableMeta = metadata ? JSON.stringify(metadata) : '';
+    const cacheKey = hashKey(`${userId}::${messageText}::${stableMeta}`);
+
     const cached = getCachedMemory(cacheKey);
-    if (cached) {
-      return res.json(cached);
-    }
+    if (cached) return res.json(cached);
 
     const contextResult = await buildContextPack({
       userId,
@@ -81,6 +123,7 @@ export async function handleContextPack(req, res, next) {
     const payload = {
       context_pack: contextResult.contextPack,
       retrieval_debug: contextResult.retrievalDebug,
+      token_estimate: contextResult.tokenEstimate,
     };
 
     setCachedMemory(cacheKey, payload, RETRIEVAL_CACHE_TTL_MS);

@@ -17,21 +17,19 @@ const memoryItemSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    tags: {
-      type: [String],
-      default: [],
-    },
-    embedding: {
-      type: [Number],
-      default: [],
-    },
-    embeddingModel: {
+    textHash: {
       type: String,
+      required: true,
+      index: true,
     },
+    tags: { type: [String], default: [] },
+    embedding: { type: [Number], default: [] },
+    embeddingModel: { type: String },
   },
   { timestamps: true }
 );
 
 memoryItemSchema.index({ userId: 1, createdAt: -1 });
+memoryItemSchema.index({ userId: 1, sourceSessionId: 1, textHash: 1 }, { unique: true });
 
 export const MemoryItem = mongoose.model('MemoryItem', memoryItemSchema);

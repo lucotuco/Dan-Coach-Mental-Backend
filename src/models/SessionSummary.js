@@ -18,51 +18,21 @@ const sessionSummarySchema = new mongoose.Schema(
       default: Date.now,
       index: true,
     },
-    contexto: {
-      type: String,
-      default: '',
-    },
-    tema_principal: {
-      type: String,
-      default: '',
-    },
-    problema_clave: {
-      type: String,
-      default: '',
-    },
-    hipotesis: {
-      type: String,
-      default: '',
-    },
-    plan_accion: {
-      type: [String],
-      default: [],
-    },
-    acuerdos_tareas: {
-      type: [String],
-      default: [],
-    },
-    seguimiento_proximo: {
-      type: [String],
-      default: [],
-    },
-    tags: {
-      type: [String],
-      default: [],
-    },
-    confidence: {
-      type: Number,
-      min: 0,
-      max: 1,
-      default: 0.5,
-    },
+    contexto: { type: String, default: '' },
+    tema_principal: { type: String, default: '' },
+    problema_clave: { type: String, default: '' },
+    hipotesis: { type: String, default: '' },
+    plan_accion: { type: [String], default: [] },
+    acuerdos_tareas: { type: [String], default: [] },
+    seguimiento_proximo: { type: [String], default: [] },
+    tags: { type: [String], default: [] },
+    confidence: { type: Number, min: 0, max: 1, default: 0.5 },
   },
   { timestamps: true }
 );
 
+// ✅ evita duplicados por retries
+sessionSummarySchema.index({ userId: 1, sessionId: 1 }, { unique: true });
 sessionSummarySchema.index({ userId: 1, date: -1 });
 
-export const SessionSummary = mongoose.model(
-  'SessionSummary',
-  sessionSummarySchema
-);
+export const SessionSummary = mongoose.model('SessionSummary', sessionSummarySchema);

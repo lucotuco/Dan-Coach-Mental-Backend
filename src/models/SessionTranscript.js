@@ -24,6 +24,8 @@ const sessionTranscriptSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// ✅ evita duplicados por retries
+sessionTranscriptSchema.index({ userId: 1, sessionId: 1 }, { unique: true });
 sessionTranscriptSchema.index({ userId: 1, createdAt: -1 });
 
 export const SessionTranscript = mongoose.model(

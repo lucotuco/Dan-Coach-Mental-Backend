@@ -9,14 +9,8 @@ const longTermBriefSchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
-    text: {
-      type: String,
-      required: true,
-    },
-    sourceSessionIds: {
-      type: [String],
-      default: [],
-    },
+    text: { type: String, required: true },
+    sourceSessionIds: { type: [String], default: [] },
   },
   { timestamps: true }
 );
