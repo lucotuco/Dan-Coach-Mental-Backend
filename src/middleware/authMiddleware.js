@@ -37,6 +37,7 @@ export function authMiddleware(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+    console.log('[AUTH] decoded JWT payload:', decoded);
     req.user = decoded;
     return next();
   } catch {
