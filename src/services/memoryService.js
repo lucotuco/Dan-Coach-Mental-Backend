@@ -1,5 +1,5 @@
+import mongoose from 'mongoose';
 import { openai } from './openaiClient.js';
-import crypto from 'crypto';
 import { SessionTranscript } from '../models/SessionTranscript.js';
 import { SessionSummary } from '../models/SessionSummary.js';
 import { UserProfile } from '../models/UserProfile.js';
@@ -10,27 +10,39 @@ const DEFAULT_EMBEDDING_MODEL =
   process.env.DAN_EMBEDDING_MODEL || 'text-embedding-3-small';
 const DEFAULT_SUMMARY_MODEL =
   process.env.DAN_SUMMARY_MODEL || 'gpt-4.1-mini';
+
 const DEFAULT_CONTEXT_TOKEN_BUDGET = parseInt(
   process.env.DAN_CONTEXT_BUDGET || '1500',
   10
 );
+
 const DEFAULT_LONG_TERM_INTERVAL = parseInt(
   process.env.DAN_LONG_TERM_INTERVAL || '5',
   10
 );
 
+// ✅ Vector search controls
 const USE_ATLAS_VECTOR_SEARCH =
   String(process.env.DAN_USE_ATLAS_VECTOR_SEARCH || 'false').toLowerCase() === 'true';
 
-// Nombre del índice de Vector Search en Atlas (lo creás en tu cluster)
-const ATLAS_VECTOR_INDEX_NAME = process.env.DAN_ATLAS_VECTOR_INDEX || 'memoryItemsVectorIndex';
+const ATLAS_VECTOR_INDEX =
+  process.env.DAN_ATLAS_VECTOR_INDEX || 'memoryItemsVectorIndex';
 
-const FALLBACK_LIMIT = parseInt(process.env.DAN_MEMORY_FALLBACK_LIMIT || '300', 10);
+// Score threshold: evita traer “cosas meh”
+const DEFAULT_VECTOR_SCORE_THRESHOLD = parseFloat(
+  process.env.DAN_VECTOR_SCORE_THRESHOLD || '0.72'
+);
+
+// numCandidates (más = más recall, más costo)
+const DEFAULT_VECTOR_NUM_CANDIDATES = parseInt(
+  process.env.DAN_VECTOR_NUM_CANDIDATES || '200',
+  10
+);
 
 function safeJsonParse(raw) {
   try {
     return JSON.parse(raw);
-  } catch {
+  } catch (error) {
     return null;
   }
 }
@@ -51,7 +63,6 @@ function normalizeList(value) {
   return [];
 }
 
-// estimador simple con margen; evitamos ir al límite real
 function estimateTokens(text) {
   if (!text) return 0;
   return Math.ceil(text.length / 4);
@@ -71,18 +82,14 @@ function cosineSimilarity(a = [], b = []) {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-function sha256(text) {
-  return crypto.createHash('sha256').update(text).digest('hex');
-}
-
 async function createEmbedding(text) {
-  if (!openai.apiKey) throw new Error('OpenAI API key is missing. Set OPENAI_API_KEY.');
-
+  if (!openai.apiKey) {
+    throw new Error('OpenAI API key is missing. Set OPENAI_API_KEY.');
+  }
   const response = await openai.embeddings.create({
     model: DEFAULT_EMBEDDING_MODEL,
     input: text,
   });
-
   return {
     vector: response.data?.[0]?.embedding || [],
     model: DEFAULT_EMBEDDING_MODEL,
@@ -90,8 +97,9 @@ async function createEmbedding(text) {
 }
 
 async function generateStructuredSummary(transcript) {
-  if (!openai.apiKey) throw new Error('OpenAI API key is missing. Set OPENAI_API_KEY.');
-
+  if (!openai.apiKey) {
+    throw new Error('OpenAI API key is missing. Set OPENAI_API_KEY.');
+  }
   const prompt = `Sos un agente de backend de DAN. Generá un resumen estructurado de la sesión a partir del transcript.
 
 Reglas:
@@ -120,24 +128,26 @@ Transcript:
   const response = await openai.responses.create({
     model: DEFAULT_SUMMARY_MODEL,
     input: [
-      { role: 'system', content: 'Respondé únicamente con JSON válido, sin texto extra.' },
+      {
+        role: 'system',
+        content: 'Respondé únicamente con JSON válido, sin texto extra.',
+      },
       { role: 'user', content: prompt },
     ],
   });
 
   const raw = stripCodeFences(response.output_text || '');
   const parsed = safeJsonParse(raw);
-
   if (!parsed) {
     throw new Error('No se pudo generar un JSON válido para el SessionSummary.');
   }
-
   return parsed;
 }
 
 async function inferUserProfileUpdates(transcript) {
-  if (!openai.apiKey) throw new Error('OpenAI API key is missing. Set OPENAI_API_KEY.');
-
+  if (!openai.apiKey) {
+    throw new Error('OpenAI API key is missing. Set OPENAI_API_KEY.');
+  }
   const prompt = `Analizá el transcript y proponé SOLO actualizaciones explícitamente confirmadas por el usuario.
 Si no hay actualizaciones explícitas, respondé con {"hasUpdates": false}.
 
@@ -185,14 +195,16 @@ Transcript:
 
   const raw = stripCodeFences(response.output_text || '');
   const parsed = safeJsonParse(raw);
-
-  if (!parsed || typeof parsed.hasUpdates !== 'boolean') return { hasUpdates: false };
+  if (!parsed || typeof parsed.hasUpdates !== 'boolean') {
+    return { hasUpdates: false };
+  }
   return parsed;
 }
 
-async function buildLongTermBriefFromSummaries(summariesText) {
-  if (!openai.apiKey) throw new Error('OpenAI API key is missing. Set OPENAI_API_KEY.');
-
+async function buildLongTermBriefFromSummaries(summaries) {
+  if (!openai.apiKey) {
+    throw new Error('OpenAI API key is missing. Set OPENAI_API_KEY.');
+  }
   const prompt = `Generá un brief de largo plazo (2000-3000 caracteres máx) basado en estos resúmenes.
 Incluir:
 - patrones confirmados
@@ -202,12 +214,16 @@ Incluir:
 Escribí en español, en bullets cortos. No inventes datos.
 
 Resúmenes:
-${summariesText}`;
+${summaries.map((summary, idx) => `#${idx + 1}\n${summary}`).join('\n')}`;
 
   const response = await openai.responses.create({
     model: DEFAULT_SUMMARY_MODEL,
     input: [
-      { role: 'system', content: 'Respondé únicamente con texto en bullets, sin encabezados adicionales.' },
+      {
+        role: 'system',
+        content:
+          'Respondé únicamente con texto en bullets, sin encabezados adicionales.',
+      },
       { role: 'user', content: prompt },
     ],
   });
@@ -247,20 +263,23 @@ function summaryToMemoryItems(summary) {
   return items.slice(0, 6);
 }
 
-// ✅ idempotente
-export async function saveSessionTranscript({ userId, sessionId, transcript, metadata }) {
-  return SessionTranscript.findOneAndUpdate(
-    { userId, sessionId },
-    { $set: { transcript, metadata } },
-    { upsert: true, new: true }
-  );
+export async function saveSessionTranscript({
+  userId,
+  sessionId,
+  transcript,
+  metadata,
+}) {
+  return SessionTranscript.create({
+    userId,
+    sessionId,
+    transcript,
+    metadata,
+  });
 }
 
-// ✅ idempotente
 export async function createSessionSummary({ userId, sessionId, transcript }) {
   const parsed = await generateStructuredSummary(transcript);
-
-  const payload = {
+  const summaryDoc = await SessionSummary.create({
     userId,
     sessionId,
     contexto: parsed.contexto || '',
@@ -271,29 +290,35 @@ export async function createSessionSummary({ userId, sessionId, transcript }) {
     acuerdos_tareas: normalizeList(parsed.acuerdos_tareas),
     seguimiento_proximo: normalizeList(parsed.seguimiento_proximo),
     tags: normalizeList(parsed.tags),
-    confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
-    date: new Date(),
-  };
+    confidence:
+      typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
+  });
 
-  return SessionSummary.findOneAndUpdate(
-    { userId, sessionId },
-    { $set: payload },
-    { upsert: true, new: true }
-  );
+  return summaryDoc;
 }
 
 export async function updateUserProfileFromTranscript({ userId, transcript }) {
   const profileUpdate = await inferUserProfileUpdates(transcript);
-  if (!profileUpdate.hasUpdates || !profileUpdate.updates) return { updated: false };
+  if (!profileUpdate.hasUpdates || !profileUpdate.updates) {
+    return { updated: false };
+  }
 
   const updates = profileUpdate.updates || {};
   const updatePayload = {};
-  const listFields = ['goals', 'preferences', 'restrictions', 'stableFacts', 'historyNotes'];
+  const listFields = [
+    'goals',
+    'preferences',
+    'restrictions',
+    'stableFacts',
+    'historyNotes',
+  ];
 
   if (updates.sport) updatePayload.sport = updates.sport;
   if (updates.role) updatePayload.role = updates.role;
   if (updates.level) updatePayload.level = updates.level;
-  if (updates.competitionContext) updatePayload.competitionContext = updates.competitionContext;
+  if (updates.competitionContext) {
+    updatePayload.competitionContext = updates.competitionContext;
+  }
 
   listFields.forEach((field) => {
     if (Array.isArray(updates[field]) && updates[field].length) {
@@ -301,7 +326,9 @@ export async function updateUserProfileFromTranscript({ userId, transcript }) {
     }
   });
 
-  if (!Object.keys(updatePayload).length) return { updated: false };
+  if (!Object.keys(updatePayload).length) {
+    return { updated: false };
+  }
 
   await UserProfile.findOneAndUpdate(
     { userId },
@@ -312,73 +339,62 @@ export async function updateUserProfileFromTranscript({ userId, transcript }) {
   return { updated: true };
 }
 
-export async function createMemoryItemsFromSummary({ userId, sessionId, summary }) {
+export async function createMemoryItemsFromSummary({
+  userId,
+  sessionId,
+  summary,
+}) {
   const memoryItems = summaryToMemoryItems(summary);
-  if (!memoryItems.length) return { created: 0 };
+  if (!memoryItems.length) {
+    return { created: 0 };
+  }
 
   const embeddedItems = [];
   for (const item of memoryItems) {
     const embedding = await createEmbedding(item.text);
-    const textHash = sha256(item.text);
-
     embeddedItems.push({
       userId,
       sourceSessionId: sessionId,
       text: item.text,
-      textHash,
       tags: item.tags || [],
       embedding: embedding.vector,
       embeddingModel: embedding.model,
     });
   }
 
-  // insertMany con ordered:false para ignorar duplicados por unique index
-  try {
-    const docs = await MemoryItem.insertMany(embeddedItems, { ordered: false });
-    return { created: docs.length };
-  } catch (err) {
-    // Si hay duplicados (E11000), igual consideramos creado parcialmente.
-    if (String(err?.code) === '11000') {
-      return { created: 0 };
-    }
-    throw err;
-  }
+  const docs = await MemoryItem.insertMany(embeddedItems);
+  return { created: docs.length };
 }
 
-// ✅ brief “rolling”: usa últimas 20 para patrones más estables
 export async function refreshLongTermBriefIfNeeded({ userId, force = false }) {
   const count = await SessionSummary.countDocuments({ userId });
-
   if (!force && count % DEFAULT_LONG_TERM_INTERVAL !== 0) {
     return { updated: false };
   }
 
   const summaries = await SessionSummary.find({ userId })
     .sort({ date: -1 })
-    .limit(20)
+    .limit(DEFAULT_LONG_TERM_INTERVAL)
     .lean();
 
-  if (!summaries.length) return { updated: false };
+  if (!summaries.length) {
+    return { updated: false };
+  }
 
-  const summariesText = summaries
-    .map((s, idx) => {
-      return `#${idx + 1}
-Contexto: ${s.contexto || ''}
-Tema: ${s.tema_principal || ''}
-Problema: ${s.problema_clave || ''}
-Plan: ${(s.plan_accion || []).join('; ')}
-Tareas: ${(s.acuerdos_tareas || []).join('; ')}`.trim();
-    })
-    .join('\n\n');
+  const summaryTexts = summaries.map(
+    (summary) =>
+      `Contexto: ${summary.contexto}\nTema: ${summary.tema_principal}\nProblema: ${summary.problema_clave}\nPlan: ${summary.plan_accion?.join(
+        '; '
+      )}\nTareas: ${summary.acuerdos_tareas?.join('; ')}`
+  );
 
-  const briefText = await buildLongTermBriefFromSummaries(summariesText);
-
+  const briefText = await buildLongTermBriefFromSummaries(summaryTexts);
   await LongTermBrief.findOneAndUpdate(
     { userId },
     {
       $set: {
         text: briefText,
-        sourceSessionIds: summaries.map((s) => s.sessionId),
+        sourceSessionIds: summaries.map((summary) => summary.sessionId),
       },
     },
     { upsert: true, new: true }
@@ -387,33 +403,40 @@ Tareas: ${(s.acuerdos_tareas || []).join('; ')}`.trim();
   return { updated: true };
 }
 
-async function atlasVectorSearch({ userId, queryVector, topK }) {
-  // Requiere Atlas Vector Search y un índice creado sobre MemoryItem.embedding
-  // fields esperados: embedding (vector), userId (filter)
+// ✅ Atlas Vector Search retrieval
+async function retrieveMemoriesAtlasVector({
+  userId,
+  queryVector,
+  topK,
+  numCandidates,
+  scoreThreshold,
+}) {
+  const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+
   const pipeline = [
     {
       $vectorSearch: {
-        index: ATLAS_VECTOR_INDEX_NAME,
+        index: ATLAS_VECTOR_INDEX,
         path: 'embedding',
         queryVector,
-        numCandidates: Math.max(50, topK * 20),
+        numCandidates,
         limit: topK,
-        filter: {
-          userId: typeof userId === 'string' ? userId : userId,
-        },
+        filter: { userId: userObjectId },
       },
     },
     {
       $project: {
-        _id: 1,
         text: 1,
         tags: 1,
+        userId: 1,
+        sourceSessionId: 1,
         score: { $meta: 'vectorSearchScore' },
       },
     },
   ];
 
-  return MemoryItem.aggregate(pipeline);
+  const results = await MemoryItem.aggregate(pipeline);
+  return results.filter((r) => (typeof r.score === 'number' ? r.score >= scoreThreshold : false));
 }
 
 export async function buildContextPack({
@@ -431,42 +454,52 @@ export async function buildContextPack({
 
   const queryEmbedding = await createEmbedding(messageText);
 
+  // ✅ Retrieval: Vector Search (Atlas) o fallback a cosine local
   let retrieved = [];
-  if (USE_ATLAS_VECTOR_SEARCH) {
-    // ✅ escalable si Atlas Vector Search está configurado
-    try {
-      retrieved = await atlasVectorSearch({
+  let retrievalMode = 'atlas_vector';
+
+  try {
+    if (USE_ATLAS_VECTOR_SEARCH) {
+      retrieved = await retrieveMemoriesAtlasVector({
         userId,
         queryVector: queryEmbedding.vector,
         topK,
+        numCandidates: DEFAULT_VECTOR_NUM_CANDIDATES,
+        scoreThreshold: DEFAULT_VECTOR_SCORE_THRESHOLD,
       });
-    } catch (e) {
-      // fallback silencioso si no está configurado todavía
-      retrieved = [];
+    } else {
+      retrievalMode = 'local_cosine';
+      const memoryItems = await MemoryItem.find({ userId }).lean();
+      const scoredItems = memoryItems
+        .map((item) => ({
+          item,
+          score: cosineSimilarity(queryEmbedding.vector, item.embedding),
+        }))
+        .sort((a, b) => b.score - a.score)
+        .filter((e) => e.score > 0)
+        .slice(0, topK);
+
+      retrieved = scoredItems.map((e) => ({
+        ...e.item,
+        score: e.score,
+      }));
     }
-  }
-
-  if (!retrieved.length) {
-    // ✅ fallback más seguro: NO traigas todo, limita por recencia
-    const recentItems = await MemoryItem.find({ userId })
-      .sort({ createdAt: -1 })
-      .limit(FALLBACK_LIMIT)
-      .lean();
-
-    const scoredItems = recentItems
+  } catch (e) {
+    // fallback si algo falla en Atlas (índice, permisos, etc.)
+    retrievalMode = 'fallback_local_cosine';
+    const memoryItems = await MemoryItem.find({ userId }).lean();
+    const scoredItems = memoryItems
       .map((item) => ({
         item,
         score: cosineSimilarity(queryEmbedding.vector, item.embedding),
       }))
       .sort((a, b) => b.score - a.score)
-      .filter((x) => x.score > 0)
+      .filter((e) => e.score > 0)
       .slice(0, topK);
 
-    retrieved = scoredItems.map((x) => ({
-      _id: x.item._id,
-      text: x.item.text,
-      tags: x.item.tags,
-      score: x.score,
+    retrieved = scoredItems.map((e) => ({
+      ...e.item,
+      score: e.score,
     }));
   }
 
@@ -481,21 +514,32 @@ export async function buildContextPack({
   if (profile?.sport) userProfileLines.push(`- Deporte: ${profile.sport}`);
   if (profile?.role) userProfileLines.push(`- Rol/posición: ${profile.role}`);
   if (profile?.level) userProfileLines.push(`- Nivel: ${profile.level}`);
-  if (profile?.goals?.length) userProfileLines.push(`- Objetivos: ${profile.goals.join('; ')}`);
-  if (profile?.competitionContext) userProfileLines.push(`- Contexto competitivo: ${profile.competitionContext}`);
-  if (profile?.preferences?.length) userProfileLines.push(`- Preferencias: ${profile.preferences.join('; ')}`);
-  if (profile?.restrictions?.length) userProfileLines.push(`- Restricciones: ${profile.restrictions.join('; ')}`);
-  if (profile?.stableFacts?.length) userProfileLines.push(`- Hechos estables: ${profile.stableFacts.join('; ')}`);
-  if (profile?.historyNotes?.length) userProfileLines.push(`- Notas históricas: ${profile.historyNotes.join('; ')}`);
+  if (profile?.goals?.length)
+    userProfileLines.push(`- Objetivos: ${profile.goals.join('; ')}`);
+  if (profile?.competitionContext)
+    userProfileLines.push(`- Contexto competitivo: ${profile.competitionContext}`);
+  if (profile?.preferences?.length)
+    userProfileLines.push(`- Preferencias: ${profile.preferences.join('; ')}`);
+  if (profile?.restrictions?.length)
+    userProfileLines.push(`- Restricciones: ${profile.restrictions.join('; ')}`);
+  if (profile?.stableFacts?.length)
+    userProfileLines.push(`- Hechos estables: ${profile.stableFacts.join('; ')}`);
+  if (profile?.historyNotes?.length)
+    userProfileLines.push(`- Notas históricas: ${profile.historyNotes.join('; ')}`);
 
   const lastSummaryLines = [];
   if (lastSummary) {
     if (lastSummary.contexto) lastSummaryLines.push(`- Contexto: ${lastSummary.contexto}`);
-    if (lastSummary.tema_principal) lastSummaryLines.push(`- Tema principal: ${lastSummary.tema_principal}`);
-    if (lastSummary.problema_clave) lastSummaryLines.push(`- Problema clave: ${lastSummary.problema_clave}`);
-    if (lastSummary.plan_accion?.length) lastSummaryLines.push(`- Plan acción: ${lastSummary.plan_accion.join('; ')}`);
-    if (lastSummary.acuerdos_tareas?.length) lastSummaryLines.push(`- Acuerdos/tareas: ${lastSummary.acuerdos_tareas.join('; ')}`);
-    if (lastSummary.seguimiento_proximo?.length) lastSummaryLines.push(`- Seguimiento próximo: ${lastSummary.seguimiento_proximo.join('; ')}`);
+    if (lastSummary.tema_principal)
+      lastSummaryLines.push(`- Tema principal: ${lastSummary.tema_principal}`);
+    if (lastSummary.problema_clave)
+      lastSummaryLines.push(`- Problema clave: ${lastSummary.problema_clave}`);
+    if (lastSummary.plan_accion?.length)
+      lastSummaryLines.push(`- Plan acción: ${lastSummary.plan_accion.join('; ')}`);
+    if (lastSummary.acuerdos_tareas?.length)
+      lastSummaryLines.push(`- Acuerdos/tareas: ${lastSummary.acuerdos_tareas.join('; ')}`);
+    if (lastSummary.seguimiento_proximo?.length)
+      lastSummaryLines.push(`- Seguimiento próximo: ${lastSummary.seguimiento_proximo.join('; ')}`);
   }
 
   const briefLines = brief?.text
@@ -507,87 +551,65 @@ export async function buildContextPack({
         .map((line) => (line.startsWith('-') ? line : `- ${line}`))
     : [];
 
-  const memoryLines = retrieved.map((entry) => {
-    const bullets = String(entry.text || '')
+  const memoryLines = retrieved.map((item) => {
+    const bullets = (item.text || '')
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean)
       .slice(0, 3)
       .map((line) => (line.startsWith('-') ? line : `- ${line}`));
-
-    return `- (item_id: ${entry._id})\n${bullets.join('\n')}`;
+    return `- (item_id: ${item._id}) (score: ${typeof item.score === 'number' ? item.score.toFixed(3) : 'n/a'})\n${bullets.join('\n')}`;
   });
 
-  function buildPack({
-    userLines,
-    briefL,
-    lastL,
-    memL,
-  }) {
-    return [
-      'USER_PROFILE:',
-      userLines.length ? userLines.join('\n') : '- (sin datos)',
-      'LONG_TERM_BRIEF:',
-      briefL.length ? briefL.join('\n') : '- (sin datos)',
-      'LAST_SESSION_SUMMARY:',
-      lastL.length ? lastL.join('\n') : '- (sin datos)',
-      'RELEVANT_MEMORIES:',
-      memL.length ? memL.join('\n') : '- (sin datos)',
-      'COACHING_STYLE_RULES:',
-      coachingRules.map((r) => `- ${r}`).join('\n'),
-      'OPEN_LOOPS:',
-      'Tareas pendientes:',
-      lastSummary?.acuerdos_tareas?.length
-        ? lastSummary.acuerdos_tareas.slice(0, 4).map((t) => `- ${t}`).join('\n')
-        : '- (sin tareas pendientes)',
-      'Preguntas sugeridas:',
-      lastSummary?.seguimiento_proximo?.length
-        ? lastSummary.seguimiento_proximo.slice(0, 4).map((q) => `- ${q}`).join('\n')
-        : '- (sin preguntas sugeridas)',
-    ].join('\n');
+  let contextPack = [
+    'USER_PROFILE:',
+    userProfileLines.length ? userProfileLines.join('\n') : '- (sin datos)',
+    'LONG_TERM_BRIEF:',
+    briefLines.length ? briefLines.join('\n') : '- (sin datos)',
+    'LAST_SESSION_SUMMARY:',
+    lastSummaryLines.length ? lastSummaryLines.join('\n') : '- (sin datos)',
+    'RELEVANT_MEMORIES:',
+    memoryLines.length ? memoryLines.join('\n') : '- (sin datos)',
+    'COACHING_STYLE_RULES:',
+    coachingRules.map((rule) => `- ${rule}`).join('\n'),
+    'OPEN_LOOPS:',
+    'Tareas pendientes:',
+    lastSummary?.acuerdos_tareas?.length
+      ? lastSummary.acuerdos_tareas
+          .slice(0, 4)
+          .map((task) => `- ${task}`)
+          .join('\n')
+      : '- (sin tareas pendientes)',
+    'Preguntas sugeridas:',
+    lastSummary?.seguimiento_proximo?.length
+      ? lastSummary.seguimiento_proximo
+          .slice(0, 4)
+          .map((question) => `- ${question}`)
+          .join('\n')
+      : '- (sin preguntas sugeridas)',
+  ].join('\n');
+
+  // Token budget adjustments (simple)
+  let currentTokens = estimateTokens(contextPack);
+  if (currentTokens > tokenBudget && memoryLines.length > 2) {
+    const trimmedMemory = memoryLines.slice(0, 2);
+    contextPack = contextPack.replace(
+      /RELEVANT_MEMORIES:[\s\S]*?COACHING_STYLE_RULES:/m,
+      `RELEVANT_MEMORIES:\n${trimmedMemory.join('\n')}\nCOACHING_STYLE_RULES:`
+    );
   }
 
-  // recortes progresivos
-  let u = [...userProfileLines];
-  let b = [...briefLines];
-  let l = [...lastSummaryLines];
-  let m = [...memoryLines];
-
-  let contextPack = buildPack({ userLines: u, briefL: b, lastL: l, memL: m });
-  let tokens = estimateTokens(contextPack);
-
-  if (tokens > tokenBudget && m.length > 2) {
-    m = m.slice(0, 2);
-    contextPack = buildPack({ userLines: u, briefL: b, lastL: l, memL: m });
-    tokens = estimateTokens(contextPack);
-  }
-
-  if (tokens > tokenBudget && b.length) {
-    b = b.slice(0, 3);
-    contextPack = buildPack({ userLines: u, briefL: b, lastL: l, memL: m });
-    tokens = estimateTokens(contextPack);
-  }
-
-  if (tokens > tokenBudget && l.length > 5) {
-    l = l.slice(0, 5);
-    contextPack = buildPack({ userLines: u, briefL: b, lastL: l, memL: m });
-    tokens = estimateTokens(contextPack);
-  }
-
-  if (tokens > tokenBudget && u.length > 8) {
-    u = u.slice(0, 8);
-    contextPack = buildPack({ userLines: u, briefL: b, lastL: l, memL: m });
-    tokens = estimateTokens(contextPack);
-  }
+  currentTokens = estimateTokens(contextPack);
 
   return {
     contextPack,
-    retrievalDebug: retrieved.map((x) => ({
-      id: x._id,
-      score: x.score,
-      tags: x.tags,
+    retrievalDebug: retrieved.map((item) => ({
+      id: item._id,
+      score: item.score,
+      tags: item.tags,
+      sourceSessionId: item.sourceSessionId,
     })),
-    tokenEstimate: tokens,
-    metadata,
+    tokenEstimate: currentTokens,
+    metadata: { ...metadata, retrievalMode, index: ATLAS_VECTOR_INDEX },
   };
 }
