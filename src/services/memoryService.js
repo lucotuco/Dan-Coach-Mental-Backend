@@ -643,18 +643,6 @@ export async function buildContextPack({
   };
 }
 
-export async function detectTopicShift({
-  previousEmbedding,
-  newText,
-  threshold = DEFAULT_TOPIC_SHIFT_THRESHOLD,
-}) {
-  const { vector } = await getTextEmbedding(newText);
-  if (!previousEmbedding || !Array.isArray(previousEmbedding) || !previousEmbedding.length) {
-    return { shifted: false, similarity: 1, newEmbedding: vector };
-  }
-  const similarity = cosineSimilarity(previousEmbedding, vector);
-  return { shifted: similarity < threshold, similarity, newEmbedding: vector };
-}
 // ✅ Topic shift detector (realtime refresh)
 export async function detectTopicShift({
   previousEmbedding,
