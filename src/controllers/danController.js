@@ -113,6 +113,18 @@ export async function chatWithDanController(req, res, next) {
       tokenBudget: parseInt(process.env.DAN_CONTEXT_BUDGET || '1500', 10),
       topK: parseInt(process.env.DAN_CONTEXT_TOPK || '4', 10),
     });
+const DEBUG = String(process.env.DAN_DEBUG_PROMPTS || 'false').toLowerCase() === 'true';
+const MAX = parseInt(process.env.DAN_DEBUG_MAX_CHARS || '4000', 10);
+
+if (DEBUG) {
+  console.log('==== DAN TEXT REQUEST DEBUG ====');
+  console.log('conversationId:', String(conversation._id));
+  console.log('userMessage:', String(message).slice(0, MAX));
+  console.log('contextPack:', (ctx.contextPack || '').slice(0, MAX));
+  console.log('retrievalMode:', ctx.metadata?.retrievalMode);
+  console.log('retrievedMemories:', ctx.retrievalDebug);
+  console.log('==== END DEBUG ====');
+}
 
     const reply = await chatWithDan({
       user,
