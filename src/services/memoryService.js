@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import crypto from 'crypto';
 import { openai } from './openaiClient.js';
 import { SessionTranscript } from '../models/SessionTranscript.js';
 import { SessionSummary } from '../models/SessionSummary.js';
@@ -23,7 +24,8 @@ const DEFAULT_LONG_TERM_INTERVAL = parseInt(
 
 // ✅ Vector search controls
 const USE_ATLAS_VECTOR_SEARCH =
-  String(process.env.DAN_USE_ATLAS_VECTOR_SEARCH || 'false').toLowerCase() === 'true';
+  String(process.env.DAN_USE_ATLAS_VECTOR_SEARCH || 'false').toLowerCase() ===
+  'true';
 
 const ATLAS_VECTOR_INDEX =
   process.env.DAN_ATLAS_VECTOR_INDEX || 'memoryItemsVectorIndex';
@@ -37,6 +39,11 @@ const DEFAULT_VECTOR_SCORE_THRESHOLD = parseFloat(
 const DEFAULT_VECTOR_NUM_CANDIDATES = parseInt(
   process.env.DAN_VECTOR_NUM_CANDIDATES || '200',
   10
+);
+
+// Topic shift
+export const DEFAULT_TOPIC_SHIFT_THRESHOLD = parseFloat(
+  process.env.DAN_TOPIC_SHIFT_THRESHOLD || '0.78'
 );
 
 function safeJsonParse(raw) {
@@ -68,7 +75,7 @@ function estimateTokens(text) {
   return Math.ceil(text.length / 4);
 }
 
-function cosineSimilarity(a = [], b = []) {
+export function cosineSimilarity(a = [], b = []) {
   if (!a.length || !b.length || a.length !== b.length) return 0;
   let dot = 0;
   let normA = 0;
@@ -82,7 +89,11 @@ function cosineSimilarity(a = [], b = []) {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-async function createEmbedding(text) {
+function makeTextHash(text) {
+  return crypto.createHash('sha256').update(String(text || ''), 'utf8').digest('hex');
+}
+
+export async function getTextEmbedding(text) {
   if (!openai.apiKey) {
     throw new Error('OpenAI API key is missing. Set OPENAI_API_KEY.');
   }
@@ -122,8 +133,10 @@ JSON lógico:
   "confidence": 0.0
 }
 
-Transcript:
-"""${transcript}"""`;
+TRANSCRIPT:
+<<<
+${transcript}
+>>>`;
 
   const response = await openai.responses.create({
     model: DEFAULT_SUMMARY_MODEL,
@@ -178,8 +191,10 @@ Respuesta JSON:
   }
 }
 
-Transcript:
-"""${transcript}"""`;
+TRANSCRIPT:
+<<<
+${transcript}
+>>>`;
 
   const response = await openai.responses.create({
     model: DEFAULT_SUMMARY_MODEL,
@@ -269,32 +284,42 @@ export async function saveSessionTranscript({
   transcript,
   metadata,
 }) {
-  return SessionTranscript.create({
-    userId,
-    sessionId,
-    transcript,
-    metadata,
-  });
+  try {
+    return await SessionTranscript.create({
+      userId,
+      sessionId,
+      transcript,
+      metadata,
+    });
+  } catch (e) {
+    const existing = await SessionTranscript.findOne({ userId, sessionId });
+    if (existing) return existing;
+    throw e;
+  }
 }
 
 export async function createSessionSummary({ userId, sessionId, transcript }) {
   const parsed = await generateStructuredSummary(transcript);
-  const summaryDoc = await SessionSummary.create({
-    userId,
-    sessionId,
-    contexto: parsed.contexto || '',
-    tema_principal: parsed.tema_principal || '',
-    problema_clave: parsed.problema_clave || '',
-    hipotesis: parsed.hipotesis || '',
-    plan_accion: normalizeList(parsed.plan_accion),
-    acuerdos_tareas: normalizeList(parsed.acuerdos_tareas),
-    seguimiento_proximo: normalizeList(parsed.seguimiento_proximo),
-    tags: normalizeList(parsed.tags),
-    confidence:
-      typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
-  });
-
-  return summaryDoc;
+  try {
+    return await SessionSummary.create({
+      userId,
+      sessionId,
+      contexto: parsed.contexto || '',
+      tema_principal: parsed.tema_principal || '',
+      problema_clave: parsed.problema_clave || '',
+      hipotesis: parsed.hipotesis || '',
+      plan_accion: normalizeList(parsed.plan_accion),
+      acuerdos_tareas: normalizeList(parsed.acuerdos_tareas),
+      seguimiento_proximo: normalizeList(parsed.seguimiento_proximo),
+      tags: normalizeList(parsed.tags),
+      confidence:
+        typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
+    });
+  } catch (e) {
+    const existing = await SessionSummary.findOne({ userId, sessionId });
+    if (existing) return existing;
+    throw e;
+  }
 }
 
 export async function updateUserProfileFromTranscript({ userId, transcript }) {
@@ -351,19 +376,29 @@ export async function createMemoryItemsFromSummary({
 
   const embeddedItems = [];
   for (const item of memoryItems) {
-    const embedding = await createEmbedding(item.text);
+    const embedding = await getTextEmbedding(item.text);
     embeddedItems.push({
       userId,
       sourceSessionId: sessionId,
       text: item.text,
+      textHash: makeTextHash(item.text),
       tags: item.tags || [],
       embedding: embedding.vector,
       embeddingModel: embedding.model,
     });
   }
 
-  const docs = await MemoryItem.insertMany(embeddedItems);
-  return { created: docs.length };
+  let inserted = 0;
+  try {
+    const docs = await MemoryItem.insertMany(embeddedItems, { ordered: false });
+    inserted = docs.length;
+  } catch (e) {
+    const msg = String(e?.message || '');
+    if (!msg.includes('E11000')) throw e;
+    inserted = 0;
+  }
+
+  return { created: inserted };
 }
 
 export async function refreshLongTermBriefIfNeeded({ userId, force = false }) {
@@ -411,7 +446,8 @@ async function retrieveMemoriesAtlasVector({
   numCandidates,
   scoreThreshold,
 }) {
-  const userObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+  const userObjectId =
+    typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
 
   const pipeline = [
     {
@@ -436,7 +472,9 @@ async function retrieveMemoriesAtlasVector({
   ];
 
   const results = await MemoryItem.aggregate(pipeline);
-  return results.filter((r) => (typeof r.score === 'number' ? r.score >= scoreThreshold : false));
+  return results.filter((r) =>
+    typeof r.score === 'number' ? r.score >= scoreThreshold : false
+  );
 }
 
 export async function buildContextPack({
@@ -452,7 +490,7 @@ export async function buildContextPack({
     SessionSummary.findOne({ userId }).sort({ date: -1 }).lean(),
   ]);
 
-  const queryEmbedding = await createEmbedding(messageText);
+  const queryEmbedding = await getTextEmbedding(messageText);
 
   // ✅ Retrieval: Vector Search (Atlas) o fallback a cosine local
   let retrieved = [];
@@ -485,7 +523,6 @@ export async function buildContextPack({
       }));
     }
   } catch (e) {
-    // fallback si algo falla en Atlas (índice, permisos, etc.)
     retrievalMode = 'fallback_local_cosine';
     const memoryItems = await MemoryItem.find({ userId }).lean();
     const scoredItems = memoryItems
@@ -517,23 +554,29 @@ export async function buildContextPack({
   if (profile?.goals?.length)
     userProfileLines.push(`- Objetivos: ${profile.goals.join('; ')}`);
   if (profile?.competitionContext)
-    userProfileLines.push(`- Contexto competitivo: ${profile.competitionContext}`);
+    userProfileLines.push(
+      `- Contexto competitivo: ${profile.competitionContext}`
+    );
   if (profile?.preferences?.length)
     userProfileLines.push(`- Preferencias: ${profile.preferences.join('; ')}`);
   if (profile?.restrictions?.length)
-    userProfileLines.push(`- Restricciones: ${profile.restrictions.join('; ')}`);
+    userProfileLines.push(
+      `- Restricciones: ${profile.restrictions.join('; ')}`
+    );
   if (profile?.stableFacts?.length)
-    userProfileLines.push(`- Hechos estables: ${profile.stableFacts.join('; ')}`);
+    userProfileLines.push(
+      `- Hechos estables: ${profile.stableFacts.join('; ')}`
+    );
   if (profile?.historyNotes?.length)
-    userProfileLines.push(`- Notas históricas: ${profile.historyNotes.join('; ')}`);
+    userProfileLines.push(
+      `- Notas históricas: ${profile.historyNotes.join('; ')}`
+    );
 
   const lastSummaryLines = [];
   if (lastSummary) {
     if (lastSummary.contexto) lastSummaryLines.push(`- Contexto: ${lastSummary.contexto}`);
-    if (lastSummary.tema_principal)
-      lastSummaryLines.push(`- Tema principal: ${lastSummary.tema_principal}`);
-    if (lastSummary.problema_clave)
-      lastSummaryLines.push(`- Problema clave: ${lastSummary.problema_clave}`);
+    if (lastSummary.tema_principal) lastSummaryLines.push(`- Tema principal: ${lastSummary.tema_principal}`);
+    if (lastSummary.problema_clave) lastSummaryLines.push(`- Problema clave: ${lastSummary.problema_clave}`);
     if (lastSummary.plan_accion?.length)
       lastSummaryLines.push(`- Plan acción: ${lastSummary.plan_accion.join('; ')}`);
     if (lastSummary.acuerdos_tareas?.length)
@@ -545,20 +588,22 @@ export async function buildContextPack({
   const briefLines = brief?.text
     ? brief.text
         .split('\n')
-        .map((line) => line.trim())
+        .map((l) => l.trim())
         .filter(Boolean)
         .slice(0, 6)
-        .map((line) => (line.startsWith('-') ? line : `- ${line}`))
+        .map((l) => (l.startsWith('-') ? l : `- ${l}`))
     : [];
 
   const memoryLines = retrieved.map((item) => {
     const bullets = (item.text || '')
       .split('\n')
-      .map((line) => line.trim())
+      .map((l) => l.trim())
       .filter(Boolean)
       .slice(0, 3)
-      .map((line) => (line.startsWith('-') ? line : `- ${line}`));
-    return `- (item_id: ${item._id}) (score: ${typeof item.score === 'number' ? item.score.toFixed(3) : 'n/a'})\n${bullets.join('\n')}`;
+      .map((l) => (l.startsWith('-') ? l : `- ${l}`));
+    return `- (item_id: ${item._id}) (score: ${
+      typeof item.score === 'number' ? item.score.toFixed(3) : 'n/a'
+    })\n${bullets.join('\n')}`;
   });
 
   let contextPack = [
@@ -571,35 +616,18 @@ export async function buildContextPack({
     'RELEVANT_MEMORIES:',
     memoryLines.length ? memoryLines.join('\n') : '- (sin datos)',
     'COACHING_STYLE_RULES:',
-    coachingRules.map((rule) => `- ${rule}`).join('\n'),
-    'OPEN_LOOPS:',
-    'Tareas pendientes:',
-    lastSummary?.acuerdos_tareas?.length
-      ? lastSummary.acuerdos_tareas
-          .slice(0, 4)
-          .map((task) => `- ${task}`)
-          .join('\n')
-      : '- (sin tareas pendientes)',
-    'Preguntas sugeridas:',
-    lastSummary?.seguimiento_proximo?.length
-      ? lastSummary.seguimiento_proximo
-          .slice(0, 4)
-          .map((question) => `- ${question}`)
-          .join('\n')
-      : '- (sin preguntas sugeridas)',
+    coachingRules.map((r) => `- ${r}`).join('\n'),
   ].join('\n');
 
-  // Token budget adjustments (simple)
-  let currentTokens = estimateTokens(contextPack);
-  if (currentTokens > tokenBudget && memoryLines.length > 2) {
+  let tokens = estimateTokens(contextPack);
+  if (tokens > tokenBudget && memoryLines.length > 2) {
     const trimmedMemory = memoryLines.slice(0, 2);
     contextPack = contextPack.replace(
       /RELEVANT_MEMORIES:[\s\S]*?COACHING_STYLE_RULES:/m,
       `RELEVANT_MEMORIES:\n${trimmedMemory.join('\n')}\nCOACHING_STYLE_RULES:`
     );
   }
-
-  currentTokens = estimateTokens(contextPack);
+  tokens = estimateTokens(contextPack);
 
   return {
     contextPack,
@@ -609,7 +637,37 @@ export async function buildContextPack({
       tags: item.tags,
       sourceSessionId: item.sourceSessionId,
     })),
-    tokenEstimate: currentTokens,
+    tokenEstimate: tokens,
     metadata: { ...metadata, retrievalMode, index: ATLAS_VECTOR_INDEX },
+    queryEmbedding: queryEmbedding.vector,
   };
 }
+
+export async function detectTopicShift({
+  previousEmbedding,
+  newText,
+  threshold = DEFAULT_TOPIC_SHIFT_THRESHOLD,
+}) {
+  const { vector } = await getTextEmbedding(newText);
+  if (!previousEmbedding || !Array.isArray(previousEmbedding) || !previousEmbedding.length) {
+    return { shifted: false, similarity: 1, newEmbedding: vector };
+  }
+  const similarity = cosineSimilarity(previousEmbedding, vector);
+  return { shifted: similarity < threshold, similarity, newEmbedding: vector };
+}
+// ✅ Topic shift detector (realtime refresh)
+export async function detectTopicShift({
+  previousEmbedding,
+  newText,
+  threshold = parseFloat(process.env.DAN_TOPIC_SHIFT_THRESHOLD || '0.78'),
+}) {
+  const embedding = await createEmbedding(newText);
+
+  if (!previousEmbedding || !Array.isArray(previousEmbedding) || !previousEmbedding.length) {
+    return { shifted: false, similarity: 1, newEmbedding: embedding.vector };
+  }
+
+  const similarity = cosineSimilarity(previousEmbedding, embedding.vector);
+  return { shifted: similarity < threshold, similarity, newEmbedding: embedding.vector };
+}
+

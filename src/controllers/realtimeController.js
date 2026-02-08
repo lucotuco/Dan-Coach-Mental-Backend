@@ -1,7 +1,17 @@
 // src/controllers/realtimeController.js
-import { buildCoachContext } from '../services/coachContext.js';
+import crypto from 'crypto';
 import { CoachSession } from '../models/CoachSession.js';
 import { Chequeo } from '../models/Chequeo.js';
+import { getCachedMemory, setCachedMemory } from '../services/memoryCache.js';
+import {
+  buildContextPack,
+  detectTopicShift,
+  saveSessionTranscript,
+  createSessionSummary,
+  updateUserProfileFromTranscript,
+  createMemoryItemsFromSummary,
+  refreshLongTermBriefIfNeeded,
+} from '../services/memoryService.js';
 
 const DAN_BASE_INSTRUCTIONS = `Sos DAN, coach mental deportivo virtual. Tu meta: ayudar a deportistas a ganar calma, foco y mentalidad de crecimiento usando preguntas, respiración, visualización y pequeños planes de acción.
 
@@ -9,56 +19,19 @@ Identidad y límites: Sos: coach mental, guía calmo, facilitador, entrenador de
 
 Si aparecen autolesiones, suicidio, depresión grave, traumas, adicciones, violencia o abuso: Aclarar que sos coach mental, no profesional clínico. No profundizar en detalles. Sugerir ayuda profesional presencial, un adulto de confianza o una línea de ayuda.
 
-Tono y lenguaje: Soná como una charla cercana, no como una sesión formal. Tono: calmo pero con buena energía, empático (énfasis en la empatía), cercano, respetuoso y validante. Nunca juzgar, sermonear, retar, minimizar ni comparar negativamente. Usá “vos” (rioplatense). Palabras simples, metáforas sencillas, sin tecnicismos. Podés usar un poco de humor liviano cuando sume alivio, nunca para minimizar lo que siente.
-
-Frases que podés usar (inspiración, variá): “Es válido sentirte así.”, “Gracias por compartirlo.”, “Volvamos al presente.”, “Observá sin juzgar.”, etc.
-
-Frases que NO uses (ni equivalentes): “No pasa nada.”, “No te frustres / no te enojes.”, “Eso está mal.”, “Tenés que…”, comparaciones negativas, “No es para tanto.”.
-
-Estilo de conversación (tiempo real): natural, espontáneo, cálido. Frases cortas, claras, fáciles de seguir. Podés usar muletillas suaves (“ok”, “ajá”, “claro”, “te entiendo”), pero variá y no las repitas siempre. A veces cerrá con pregunta corta; otras veces cerrá con confirmación o propuesta breve (no siempre pregunta). Adaptá el lenguaje a la edad y al deporte (sin tecnicismos). no mas de 1 o 2 preguntas x respuesta.
-
-Pasos de la sesión (GUÍA FLEXIBLE, no obligatoria ni siempre en orden):
-1) Conexión inicial: bienvenida cálida y foco del día.
-2) Validar y entender: reconocer emoción + 1–2 preguntas abiertas.
-3) Explorar hechos: preguntar qué pasó exactamente antes de interpretar.
-4) Preguntas poderosas (GROW): objetivo, control, opciones, próximo intento.
-5) Elegir UNA herramienta práctica (solo si suma):
-   - Respiración: box 4-4-4-4, 4-7-8, 3 respiraciones profundas conscientes.
-   - Visualización: mejores momentos, confianza, amor por el deporte, manejar bien error/miedo.
-   - Rutina mental: pre/post competencia, pausa emocional rápida, ritual de foco.
-   - Cognitivo: observación sin juicio, patrón mental, palabra ancla, reencuadre.
-6) Micro-plan mínimo y concreto: 1 acción chiquita y específica para el próximo momento.
-7) Cierre positivo y realista: resaltar esfuerzo/proceso sin prometer mágicamente.
-
-Regla de variación por sesión:
-- No intentar hacer una respiracion ni una visualizacion todas las sesiones.
-- No hagas los 7 pasos siempre. Usá típicamente 3–5 pasos según lo que el deportista traiga.
-- Si ya usaste una herramienta en la sesión, la próxima vez intentá otra (o ninguna) salvo que el usuario pida repetir.
-- Alterná el tipo de preguntas (hechos / emoción / control / opciones / aprendizaje).
-
-Forma de respuestas: cortas y claras. Priorizá conexión y comprensión sobre completar pasos. Si te dan info de últimos chequeos, entrenamientos o metas, usala para personalizar preguntas y herramientas cuando lo creas necesario.
-
-TOOLS DISPONIBLES (podés decidir usarlas sin pedir confirmación):
-1) save_session_summary:
-- Guardá un resumen corto de la charla cuando recibas un mensaje explícito indicando que el usuario está por cortar.
-- Usala UNA sola vez. Resumen 3 a 6 frases + próximos pasos.
-- Al usuario: solo cierre corto y cálido.
-
-2) get_recent_sessions:
-- Trae las últimas sesiones guardadas del usuario (resúmenes).
-- Podés usarla cuando aporte personalización real (ej: usuario menciona “la otra vez”, progreso, patrones, bloqueo recurrente).
-- No hace falta pedir permiso ni confirmación.
-- Usala con moderación (no en todos los mensajes).
-
-3) get_recent_checkups:
-- Trae los últimos chequeos del usuario.
-- Podés usarla cuando ayude a ajustar el enfoque (ej: estado emocional repetido, energía, motivación, sueño, estrés).
-- No hace falta pedir permiso ni confirmación.
-- Usala con moderación (no en todos los mensajes).
+Tono y lenguaje: Soná como una charla cercana, no como una sesión formal. Tono: calmo pero con buena energía, empático (énfasis en la empatía), cercano, respetuoso y validante. Nunca juzgar, sermonear, retar, minimizar ni comparar negativamente. Usá “vos” (rioplatense). Palabras simples, metáforas sencillas, sin tecnicismos. no mas de 1 o 2 preguntas x respuesta.
 
 IMPORTANTE:
 - Tu salida siempre es texto. Si la sesión está en modo audio, ese texto se convertirá en voz automáticamente.
 `.trim();
+
+function getAuthUserId(req) {
+  return req.user?.userId || req.user?.id || req.user?._id || req.user?.sub || null;
+}
+
+function buildRealtimeInstructions(base, contextPack) {
+  return base + (contextPack ? `\n\n=== CONTEXT_PACK (personalización + memoria) ===\n${contextPack}\n=== FIN CONTEXT_PACK ===\n` : '');
+}
 
 /**
  * GET /api/realtime/client-secret?mode=text|audio
@@ -70,38 +43,43 @@ export const getRealtimeClientSecret = async (req, res) => {
       return res.status(500).json({ error: 'OPENAI_API_KEY no configurada en el servidor' });
     }
 
-    const userId = req.query.userId;
+    const authUserId = getAuthUserId(req);
+    const userId = req.query.userId ? String(req.query.userId) : (authUserId ? String(authUserId) : null);
+
     const mode = (req.query.mode ?? 'text').toString().toLowerCase();
     const outputModality = mode === 'audio' ? 'audio' : 'text';
 
-    let extraContext = '';
-
+    let contextPack = '';
     if (userId) {
       try {
-        extraContext = await buildCoachContext(userId);
+        const ctx = await buildContextPack({
+          userId,
+          messageText: 'inicio de sesión realtime',
+          metadata: { channel: 'realtime', phase: 'bootstrap' },
+          tokenBudget: parseInt(process.env.DAN_CONTEXT_BUDGET || '1500', 10),
+          topK: parseInt(process.env.DAN_CONTEXT_TOPK || '4', 10),
+        });
+        contextPack = ctx.contextPack;
       } catch (err) {
-        console.error('Error armando contexto de coach:', err);
+        console.error('Error armando contextPack realtime:', err);
       }
     }
 
-    const instructions = DAN_BASE_INSTRUCTIONS + (extraContext ? `\n\n${extraContext}` : '');
+    const instructions = buildRealtimeInstructions(DAN_BASE_INSTRUCTIONS, contextPack);
 
     const sessionPayload = {
       type: 'realtime',
       model: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
       output_modalities: [outputModality],
       instructions,
-      
-          // Transcripción del input del usuario (audio) en modo audio
-          audio: {
-            input: {
-              transcription: { language: 'es', model: 'whisper-1' },
-              // turn_detection: { type: 'server_vad' },
-            },
-            output: {
-              voice: 'verse'
-            }
-          },
+      audio: {
+        input: {
+          transcription: { language: 'es', model: 'whisper-1' },
+        },
+        output: {
+          voice: process.env.DAN_REALTIME_VOICE || 'verse',
+        },
+      },
     };
 
     const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
@@ -119,10 +97,7 @@ export const getRealtimeClientSecret = async (req, res) => {
     if (!response.ok) {
       const text = await response.text();
       console.error('Error OpenAI client_secrets:', text);
-      return res.status(500).json({
-        error: 'No se pudo crear el client_secret de Realtime',
-        details: text,
-      });
+      return res.status(500).json({ error: 'No se pudo crear el client_secret de Realtime', details: text });
     }
 
     const clientSecret = await response.json();
@@ -134,22 +109,143 @@ export const getRealtimeClientSecret = async (req, res) => {
 };
 
 /**
- * POST /api/realtime/sessions
+ * POST /api/realtime/topic-shift
+ * Body: { sessionId, text }
+ * - se llama desde el front cuando llega un turno FINAL
+ */
+export const postTopicShiftCheck = async (req, res) => {
+  try {
+    const userId = getAuthUserId(req);
+    if (!userId) return res.status(401).json({ message: 'No autorizado.' });
+
+    const { sessionId, text } = req.body || {};
+    if (!sessionId || !text) {
+      return res.status(400).json({ message: 'Faltan sessionId o text en el body.' });
+    }
+
+    const minChars = Math.max(parseInt(process.env.DAN_TOPIC_SHIFT_MIN_CHARS || '80', 10), 20);
+    const cooldownMs = Math.max(parseInt(process.env.DAN_TOPIC_SHIFT_COOLDOWN_MS || '25000', 10), 0);
+    const ttlMs = Math.max(parseInt(process.env.DAN_TOPIC_SHIFT_TTL_MS || '1800000', 10), 600000);
+
+    const cleanText = String(text).trim();
+    if (cleanText.length < minChars) {
+      return res.json({ ok: true, shifted: false, reason: 'too_short', similarity: null });
+    }
+
+    const cacheKey = `rt_topic::${String(userId)}::${String(sessionId)}`;
+    const cached = getCachedMemory(cacheKey);
+    const now = Date.now();
+
+    if (cached?.lastUpdatedAt && cooldownMs && now - cached.lastUpdatedAt < cooldownMs) {
+      return res.json({ ok: true, shifted: false, reason: 'cooldown', similarity: cached.lastSimilarity ?? null });
+    }
+
+    const prevEmbedding = cached?.embedding || null;
+    const { shifted, similarity, newEmbedding } = await detectTopicShift({
+      previousEmbedding: prevEmbedding,
+      newText: cleanText,
+      threshold: parseFloat(process.env.DAN_TOPIC_SHIFT_THRESHOLD || '0.78'),
+    });
+
+    setCachedMemory(
+      cacheKey,
+      { embedding: newEmbedding, lastUpdatedAt: now, lastSimilarity: similarity },
+      ttlMs
+    );
+
+    if (!shifted) {
+      return res.json({ ok: true, shifted: false, similarity });
+    }
+
+    const ctx = await buildContextPack({
+      userId,
+      messageText: cleanText,
+      metadata: { channel: 'realtime', sessionId: String(sessionId), trigger: 'topic_shift' },
+      tokenBudget: parseInt(process.env.DAN_CONTEXT_BUDGET || '1500', 10),
+      topK: parseInt(process.env.DAN_CONTEXT_TOPK || '4', 10),
+    });
+
+    return res.json({
+      ok: true,
+      shifted: true,
+      similarity,
+      context_pack: ctx.contextPack,
+      instructions: buildRealtimeInstructions(DAN_BASE_INSTRUCTIONS, ctx.contextPack),
+      token_estimate: ctx.tokenEstimate,
+      retrieval_debug: ctx.retrievalDebug,
+    });
+  } catch (err) {
+    console.error('Error topic-shift:', err);
+    return res.status(500).json({ message: 'Error interno al chequear topic shift' });
+  }
+};
+
+/**
+ * POST /api/realtime/session-end
+ * Body: { sessionId, transcript, metadata?, forceLongTerm? }
+ */
+export const postRealtimeSessionEnd = async (req, res, next) => {
+  try {
+    const userId = getAuthUserId(req);
+    if (!userId) return res.status(401).json({ message: 'No autorizado.' });
+
+    const { sessionId, transcript, metadata, forceLongTerm } = req.body || {};
+    if (!sessionId || !transcript) {
+      return res.status(400).json({ message: 'Faltan sessionId o transcript en el body.' });
+    }
+
+    await saveSessionTranscript({
+      userId,
+      sessionId,
+      transcript,
+      metadata: { ...(metadata || {}), channel: 'realtime' },
+    });
+
+    const summaryDoc = await createSessionSummary({ userId, sessionId, transcript });
+    const profileResult = await updateUserProfileFromTranscript({ userId, transcript });
+    const memoryResult = await createMemoryItemsFromSummary({ userId, sessionId, summary: summaryDoc });
+    const longTermResult = await refreshLongTermBriefIfNeeded({ userId, force: Boolean(forceLongTerm) });
+
+    await CoachSession.create({
+      owner: userId,
+      canal: 'realtime',
+      resumen: summaryDoc?.contexto || '',
+      puntosClave: Array.isArray(summaryDoc?.acuerdos_tareas) ? summaryDoc.acuerdos_tareas : [],
+      proximoPaso: Array.isArray(summaryDoc?.plan_accion) && summaryDoc.plan_accion.length ? summaryDoc.plan_accion[0] : '',
+      modelo: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
+    });
+
+    return res.status(201).json({
+      ok: true,
+      session_summary_id: summaryDoc._id,
+      user_profile_updated: profileResult.updated,
+      memory_items_created: memoryResult.created,
+      long_term_brief_updated: longTermResult.updated,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/realtime/sessions (compat tool)
  */
 export const saveRealtimeSessionSummary = async (req, res) => {
   try {
-    const { userId, summary, keyMoments, nextStep, model } = req.body;
+    const userId = getAuthUserId(req);
+    if (!userId) return res.status(401).json({ message: 'No autorizado.' });
 
-    if (!userId || !summary) {
-      return res.status(400).json({ message: 'Faltan userId o summary en el body' });
+    const { summary, keyMoments, nextStep, model } = req.body || {};
+    if (!summary) {
+      return res.status(400).json({ message: 'Falta summary en el body' });
     }
 
     const sessionDoc = await CoachSession.create({
       owner: userId,
       canal: 'realtime',
-      resumen: summary,
+      resumen: String(summary),
       puntosClave: Array.isArray(keyMoments) ? keyMoments : [],
-      proximoPaso: nextStep || '',
+      proximoPaso: nextStep ? String(nextStep) : '',
       modelo: model || process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
     });
 
@@ -162,14 +258,14 @@ export const saveRealtimeSessionSummary = async (req, res) => {
 
 /**
  * GET /api/realtime/sessions
- * - format=tool => devuelve { ok, context } listo para tool
  */
 export const getRealtimeSessions = async (req, res) => {
   try {
-    const { userId, format } = req.query;
-    const limit = Math.min(Math.max(parseInt(req.query.limit ?? '6', 10), 1), 10);
+    const userId = getAuthUserId(req);
+    if (!userId) return res.status(401).json({ message: 'No autorizado.' });
 
-    if (!userId) return res.status(400).json({ message: 'Falta userId en el query' });
+    const { format } = req.query;
+    const limit = Math.min(Math.max(parseInt(req.query.limit ?? '6', 10), 1), 10);
 
     const sessions = await CoachSession.find({ owner: userId })
       .sort({ createdAt: -1 })
@@ -202,15 +298,15 @@ export const getRealtimeSessions = async (req, res) => {
 };
 
 /**
- * ✅ GET /api/realtime/checkups
- * - format=tool => devuelve { ok, context } listo para tool
+ * GET /api/realtime/checkups
  */
 export const getRealtimeCheckups = async (req, res) => {
   try {
-    const { userId, format } = req.query;
-    const limit = Math.min(Math.max(parseInt(req.query.limit ?? '5', 10), 1), 10);
+    const userId = getAuthUserId(req);
+    if (!userId) return res.status(401).json({ message: 'No autorizado.' });
 
-    if (!userId) return res.status(400).json({ message: 'Falta userId en el query' });
+    const { format } = req.query;
+    const limit = Math.min(Math.max(parseInt(req.query.limit ?? '5', 10), 1), 10);
 
     const checkups = await Chequeo.find({ owner: userId })
       .sort({ fecha: -1 })
@@ -230,9 +326,7 @@ export const getRealtimeCheckups = async (req, res) => {
             ch.variable5 != null && `v5=${ch.variable5}`,
             ch.variable6 != null && `v6=${ch.variable6}`,
             ch.variable7 != null && `v7=${ch.variable7}`,
-          ]
-            .filter(Boolean)
-            .join(', ');
+          ].filter(Boolean).join(', ');
 
           const audioSummary = ch.audio?.summary ? ` | audio: ${(ch.audio.summary + '').slice(0, 120)}` : '';
           const audioTags = Array.isArray(ch.audio?.tags) && ch.audio.tags.length
