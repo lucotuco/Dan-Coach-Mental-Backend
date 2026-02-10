@@ -59,14 +59,15 @@ function formatSummaryForLog(summaryDoc) {
 }
 
 /**
- * Ejecuta el pipeline “texto” usando últimos N turnos (N user turns, y hasta N*2 mensajes).
- * Deja pendingMemoryFlush=false si completó.
+ * ✅ CLAVE: en texto, flushear “lo nuevo desde el último flush”, no “los últimos N mensajes”.
+ * - Usa DanConversation.lastFlushedAt como watermark.
+ * - Si nunca flusheó, usa desde inicio.
  */
 export async function flushConversationMemory({
   userId,
   conversationId,
   reason = 'idle_flush',
-  batchUserTurns = 6,
+  batchUserTurns = 6, // mantiene compat con tus settings
   minUserTurns = 2,
 }) {
   const convoId = safeObjectId(conversationId);
@@ -75,52 +76,72 @@ export async function flushConversationMemory({
   const { enabled: LOG_ENABLED, maxChars: LOG_MAX, transcriptChars: LOG_TRX } =
     getFlushLogConfig();
 
-  // Evita flush sin contenido real
-  const userTurns = await DanMessage.countDocuments({
+  const convo = await DanConversation.findById(convoId).select('lastFlushedAt').lean();
+  const watermark = convo?.lastFlushedAt ? new Date(convo.lastFlushedAt) : new Date(0);
+
+  // “userTurns” global (para reglas minUserTurns)
+  const totalUserTurns = await DanMessage.countDocuments({
     conversationId: convoId,
     role: 'user',
   });
 
-  if (userTurns < minUserTurns) {
+  if (totalUserTurns < minUserTurns) {
     if (LOG_ENABLED) {
       console.log('[DAN][FLUSH][SKIP] not enough user turns', {
         conversationId: String(convoId),
         reason,
-        userTurns,
+        totalUserTurns,
         minUserTurns,
       });
     }
-    return { ran: false, reason: 'not_enough_user_turns', userTurns };
+    return { ran: false, reason: 'not_enough_user_turns', userTurns: totalUserTurns };
   }
 
-  const N = Math.max(parseInt(batchUserTurns, 10) || 6, 2);
-
-  const lastMsgs = await DanMessage.find({ conversationId: convoId })
-    .sort({ createdAt: -1 })
-    .limit(N * 2)
+  // Mensajes NUEVOS desde watermark
+  const maxMessages = parseInt(process.env.DAN_TEXT_FLUSH_MAX_MESSAGES || '200', 10);
+  const newMsgs = await DanMessage.find({
+    conversationId: convoId,
+    createdAt: { $gt: watermark },
+  })
+    .sort({ createdAt: 1 })
+    .limit(maxMessages)
     .select('role text createdAt')
     .lean();
 
-  const ordered = lastMsgs.reverse();
-  const transcript = buildTranscriptFromMessages(ordered);
+  // Si no hay nada nuevo, no hagas nada (evita “flush vacío” cada minuto)
+  if (!newMsgs.length) {
+    if (LOG_ENABLED) {
+      console.log('[DAN][FLUSH][SKIP] no new messages since lastFlushedAt', {
+        conversationId: String(convoId),
+        reason,
+        lastFlushedAt: watermark.toISOString(),
+      });
+    }
+    return { ran: false, reason: 'no_new_messages', userTurns: totalUserTurns };
+  }
 
-  const sessionId = `text:${String(convoId)}:${userTurns}:${reason}`;
+  // transcript de lo nuevo
+  const transcript = buildTranscriptFromMessages(newMsgs);
+
+  // sessionId único (evita colisiones por userTurns)
+  const sessionId = `text:${String(convoId)}:${Date.now()}:${reason}`;
   const metadata = {
     channel: 'text',
     conversationId: String(convoId),
-    userTurns,
-    batchSize: N,
     reason,
+    watermark: watermark.toISOString(),
+    newMessages: newMsgs.length,
+    // dejo estos por compat/debug
+    totalUserTurns,
+    batchUserTurns: Math.max(parseInt(batchUserTurns, 10) || 6, 2),
   };
 
-  // --- PIPELINE ---
   await saveSessionTranscript({ userId, sessionId, transcript, metadata });
   const summaryDoc = await createSessionSummary({ userId, sessionId, transcript });
   const profileResult = await updateUserProfileFromTranscript({ userId, transcript });
   const memoryResult = await createMemoryItemsFromSummary({ userId, sessionId, summary: summaryDoc });
   const longTermResult = await refreshLongTermBriefIfNeeded({ userId, force: false });
 
-  // ✅ LOG PARA CONTROL (lo que “va a guardar”)
   if (LOG_ENABLED) {
     const trxSnippet = transcript.slice(0, LOG_TRX);
     const summaryText = formatSummaryForLog(summaryDoc).slice(0, LOG_MAX);
@@ -130,8 +151,9 @@ export async function flushConversationMemory({
       conversationId: String(convoId),
       sessionId,
       reason,
-      userTurns,
-      batchUserTurns: N,
+      lastFlushedAt: watermark.toISOString(),
+      newMessages: newMsgs.length,
+      totalUserTurns,
       summaryId: String(summaryDoc?._id || ''),
       userProfileUpdated: Boolean(profileResult?.updated),
       memoryItemsCreated: memoryResult?.created ?? 0,
@@ -142,7 +164,7 @@ export async function flushConversationMemory({
     console.log('============== [DAN][FLUSH END] ==============');
   }
 
-  // ✅ Marcar como “ya flushed”
+  // ✅ watermark avanza: lastFlushedAt = now
   await DanConversation.findByIdAndUpdate(
     convoId,
     {
@@ -150,7 +172,7 @@ export async function flushConversationMemory({
         pendingMemoryFlush: false,
         lastFlushedAt: new Date(),
         lastFlushReason: reason,
-        lastFlushUserTurns: userTurns,
+        lastFlushUserTurns: totalUserTurns,
       },
     },
     { new: false }
@@ -163,17 +185,17 @@ export async function flushConversationMemory({
     user_profile_updated: profileResult.updated,
     memory_items_created: memoryResult.created,
     long_term_brief_updated: longTermResult.updated,
-    userTurns,
+    userTurns: totalUserTurns,
     reason,
+    newMessages: newMsgs.length,
   };
 }
 
 /**
  * Debounce en memoria: cada nuevo mensaje reprograma el flush.
- * Si el usuario cierra la app, igual corre (si el server sigue vivo).
  */
-const timers = new Map(); // key = conversationId (string), value = timeoutId
-const locks = new Set();  // evita flush simultáneo
+const timers = new Map();
+const locks = new Set();
 
 export function scheduleTextMemoryFlush({
   userId,
@@ -204,7 +226,6 @@ export function scheduleTextMemoryFlush({
         minUserTurns,
       });
 
-      // log cortito de “se ejecutó / se skippeó”
       const { enabled: LOG_ENABLED } = getFlushLogConfig();
       if (LOG_ENABLED) {
         console.log('[DAN][FLUSH][IDLE] done:', {
@@ -213,6 +234,7 @@ export function scheduleTextMemoryFlush({
           reason: result?.reason || 'idle_flush',
           userTurns: result?.userTurns,
           sessionId: result?.sessionId,
+          newMessages: result?.newMessages,
         });
       }
     } catch (e) {
@@ -226,8 +248,7 @@ export function scheduleTextMemoryFlush({
 }
 
 /**
- * Reconciler: corre en boot (y opcionalmente cada X tiempo) para no perder flush
- * si el server se reinició antes del setTimeout.
+ * Reconciler: procesa conversaciones pendientes y “viejas”.
  */
 export async function runPendingTextFlushes({
   idleMs = 90_000,

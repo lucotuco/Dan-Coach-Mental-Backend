@@ -198,8 +198,14 @@ async function inferUserProfileUpdates(transcript) {
   if (!openai.apiKey) {
     throw new Error('OpenAI API key is missing. Set OPENAI_API_KEY.');
   }
-  const prompt = `Analizá el transcript y proponé SOLO actualizaciones explícitamente confirmadas por el usuario.
+  const prompt = `Analizá el transcript y proponé SOLO actualizaciones explícitas confirmadas por el usuario (dichas por él/ella).
 Si no hay actualizaciones explícitas, respondé con {"hasUpdates": false}.
+
+Reglas importantes:
+- "preferences": permitidas SI el usuario expresa una preferencia explícita sobre cómo quiere el coaching (aunque sea 1 vez). Ej: "prefiero que...", "me sirve que...", "no me gusta que...", "quiero que me hables..."
+- NO inventes ni infieras. Nada de suposiciones.
+- Si hay duda, NO actualizar.
+- Listas cortas (máx 5 items cada una).
 
 Campos posibles:
 - sport
@@ -207,7 +213,7 @@ Campos posibles:
 - level
 - goals (lista corta)
 - competitionContext
-- preferences (solo si el usuario lo pidió repetidamente)
+- preferences (preferencias explícitas del coaching)
 - restrictions
 - stableFacts (hechos confirmados)
 - historyNotes (solo si contradice algo previo)
@@ -239,7 +245,7 @@ ${transcript}
       {
         role: 'system',
         content:
-          'Respondé únicamente con JSON válido. No inventes datos ni inferencias psicológicas.',
+          'Respondé únicamente con JSON válido. No inventes datos ni inferencias.',
       },
       { role: 'user', content: prompt },
     ],
@@ -252,6 +258,7 @@ ${transcript}
   }
   return parsed;
 }
+
 
 async function buildLongTermBriefFromSummaries(summaries) {
   if (!openai.apiKey) {
