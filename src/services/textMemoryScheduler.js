@@ -237,6 +237,10 @@ export async function runPendingTextFlushes({
   const cutoff = new Date(Date.now() - idleMs);
 
   const { enabled: LOG_ENABLED } = getFlushLogConfig();
+console.log('[DAN][RECONCILER] process/db', {
+  pid: process.pid,
+  mongo: process.env.MONGODB_URI ? new URL(process.env.MONGODB_URI).host : 'NO_URI',
+});
 
   // 🔎 Diagnóstico: ¿existen pending en BD?
   if (LOG_ENABLED) {

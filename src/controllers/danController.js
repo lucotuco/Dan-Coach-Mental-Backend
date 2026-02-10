@@ -20,10 +20,6 @@ function safeObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
 }
 
-/**
- * Pipeline automático por N turnos (tu lógica original), pero usando flushConversationMemory
- * y dejando la conversación “no pending” cuando corre.
- */
 async function maybeRunTextMemoryPipeline({ userId, conversationId }) {
   const N = Math.max(parseInt(process.env.DAN_TEXT_SUMMARY_EVERY_N_TURNS || '6', 10), 2);
 
@@ -43,25 +39,16 @@ async function maybeRunTextMemoryPipeline({ userId, conversationId }) {
   });
 }
 
-async function logConversationPendingState(conversationId, label) {
-  const enabled = String(process.env.DAN_TEXT_PENDING_DEBUG || 'true').toLowerCase() === 'true';
-  if (!enabled) return;
-
-  const dbg = await DanConversation.findById(conversationId)
-    .select('pendingMemoryFlush lastMessageAt lastFlushedAt lastFlushReason')
-    .lean();
-
-  console.log(`[DAN][TEXT][PENDING][${label}]`, {
-    conversationId: String(conversationId),
-    pendingMemoryFlush: dbg?.pendingMemoryFlush,
-    lastMessageAt: dbg?.lastMessageAt,
-    lastFlushedAt: dbg?.lastFlushedAt,
-    lastFlushReason: dbg?.lastFlushReason,
-  });
-}
-
 export async function chatWithDanController(req, res, next) {
   try {
+    // 🔎 HUELLAS: proceso + db + endpoint
+    console.log('[DAN][TEXT] controller hit', {
+      pid: process.pid,
+      node: process.version,
+      mongo: process.env.MONGODB_URI ? new URL(process.env.MONGODB_URI).host : 'NO_URI',
+      route: req.originalUrl,
+    });
+
     const authUserId = getAuthUserId(req);
     const { message, type = 'general', conversationId, chequeoId } = req.body || {};
 
@@ -89,20 +76,31 @@ export async function chatWithDanController(req, res, next) {
       });
     }
 
-    // ✅ Guardar mensaje del usuario (siempre)
-    const userMessage = await DanMessage.create({
+    // Guardar mensaje usuario
+    await DanMessage.create({
       conversationId: conversation._id,
       role: 'user',
       text: String(message),
     });
 
-    // ✅ Marcar conversación como pending para flush
+    // ✅ Marcar pending
     await DanConversation.findByIdAndUpdate(
       conversation._id,
       { $set: { pendingMemoryFlush: true, lastMessageAt: new Date() } },
       { new: false }
     );
-    await logConversationPendingState(conversation._id, 'after_user_message');
+
+    // 🔎 Confirmación inmediata leyendo de BD
+    const dbg = await DanConversation.findById(conversation._id)
+      .select('pendingMemoryFlush lastMessageAt lastFlushedAt')
+      .lean();
+
+    console.log('[DAN][TEXT] pending set result', {
+      conversationId: String(conversation._id),
+      pendingMemoryFlush: dbg?.pendingMemoryFlush,
+      lastMessageAt: dbg?.lastMessageAt,
+      lastFlushedAt: dbg?.lastFlushedAt,
+    });
 
     const chequeos = await Chequeo.find({ owner: authUserId }).sort({ fecha: -1 }).limit(5).lean();
 
@@ -114,19 +112,6 @@ export async function chatWithDanController(req, res, next) {
       topK: parseInt(process.env.DAN_CONTEXT_TOPK || '4', 10),
     });
 
-    const DEBUG = String(process.env.DAN_DEBUG_PROMPTS || 'false').toLowerCase() === 'true';
-    const MAX = parseInt(process.env.DAN_DEBUG_MAX_CHARS || '4000', 10);
-
-    if (DEBUG) {
-      console.log('==== DAN TEXT REQUEST DEBUG ====');
-      console.log('conversationId:', String(conversation._id));
-      console.log('userMessage:', String(message).slice(0, MAX));
-      console.log('contextPack:', (ctx.contextPack || '').slice(0, MAX));
-      console.log('retrievalMode:', ctx.metadata?.retrievalMode);
-      console.log('retrievedMemories:', ctx.retrievalDebug);
-      console.log('==== END DEBUG ====');
-    }
-
     const reply = await chatWithDan({
       user,
       conversation,
@@ -135,33 +120,29 @@ export async function chatWithDanController(req, res, next) {
       contextPack: ctx.contextPack,
     });
 
-    const assistantMessage = await DanMessage.create({
+    await DanMessage.create({
       conversationId: conversation._id,
       role: 'assistant',
       text: reply.text,
       responseId: reply.responseId,
     });
 
-    // Actualizar conversación (como ya hacías)
     conversation.lastResponseId = reply.responseId;
     conversation.historySummary = reply.historySummary;
     await conversation.save();
 
-    // ✅ También marcamos lastMessageAt (hubo actividad)
+    // ✅ activity
     await DanConversation.findByIdAndUpdate(
       conversation._id,
       { $set: { pendingMemoryFlush: true, lastMessageAt: new Date() } },
       { new: false }
     );
-    await logConversationPendingState(conversation._id, 'after_assistant_message');
 
-    // ✅ Trigger por N turnos (auto)
     const pipeline = await maybeRunTextMemoryPipeline({
       userId: authUserId,
       conversationId: conversation._id,
     });
 
-    // ✅ Trigger por inactividad (auto)
     scheduleTextMemoryFlush({
       userId: authUserId,
       conversationId: conversation._id,
@@ -177,13 +158,6 @@ export async function chatWithDanController(req, res, next) {
       historySummary: conversation.historySummary,
       model: reply.model,
       type: conversation.type,
-      userMessageId: userMessage._id,
-      assistantMessageId: assistantMessage._id,
-      retrieval: {
-        token_estimate: ctx.tokenEstimate,
-        retrieval_debug: ctx.retrievalDebug,
-        retrieval_mode: ctx.metadata?.retrievalMode,
-      },
       pipeline,
     });
   } catch (error) {
