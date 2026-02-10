@@ -4,6 +4,7 @@ import { openai } from './openaiClient.js';
 import { SessionTranscript } from '../models/SessionTranscript.js';
 import { SessionSummary } from '../models/SessionSummary.js';
 import { UserProfile } from '../models/UserProfile.js';
+import { User } from '../models/User.js';
 import { MemoryItem } from '../models/MemoryItem.js';
 import { LongTermBrief } from '../models/LongTermBrief.js';
 
@@ -90,7 +91,43 @@ export function cosineSimilarity(a = [], b = []) {
 }
 
 function makeTextHash(text) {
-  return crypto.createHash('sha256').update(String(text || ''), 'utf8').digest('hex');
+  return crypto
+    .createHash('sha256')
+    .update(String(text || ''), 'utf8')
+    .digest('hex');
+}
+
+/** Helpers perfil */
+function computeAge(birthDate) {
+  if (!birthDate) return null;
+  const d = new Date(birthDate);
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age -= 1;
+  return age >= 0 && age <= 110 ? age : null;
+}
+
+function firstNonEmpty(...vals) {
+  for (const v of vals) {
+    if (v == null) continue;
+    const s = String(v).trim();
+    if (s) return s;
+  }
+  return null;
+}
+
+function computeMissingProfileFields(merged) {
+  const missing = [];
+  if (!merged.name) missing.push('name');
+  if (!merged.sport) missing.push('sport');
+  if (!merged.level) missing.push('level');
+  const hasGoal =
+    Boolean(merged.goalT) ||
+    (Array.isArray(merged.goals) && merged.goals.length);
+  if (!hasGoal) missing.push('goal');
+  return missing;
 }
 
 export async function getTextEmbedding(text) {
@@ -270,7 +307,9 @@ function summaryToMemoryItems(summary) {
   const problema = summary.problema_clave?.trim();
   if (tema || problema) {
     items.push({
-      text: `Tema clave: ${tema || 'sin tema'}${problema ? ` | Problema: ${problema}` : ''}`,
+      text: `Tema clave: ${tema || 'sin tema'}${
+        problema ? ` | Problema: ${problema}` : ''
+      }`,
       tags,
     });
   }
@@ -418,9 +457,9 @@ export async function refreshLongTermBriefIfNeeded({ userId, force = false }) {
 
   const summaryTexts = summaries.map(
     (summary) =>
-      `Contexto: ${summary.contexto}\nTema: ${summary.tema_principal}\nProblema: ${summary.problema_clave}\nPlan: ${summary.plan_accion?.join(
-        '; '
-      )}\nTareas: ${summary.acuerdos_tareas?.join('; ')}`
+      `Contexto: ${summary.contexto}\nTema: ${summary.tema_principal}\nProblema: ${
+        summary.problema_clave
+      }\nPlan: ${summary.plan_accion?.join('; ')}\nTareas: ${summary.acuerdos_tareas?.join('; ')}`
   );
 
   const briefText = await buildLongTermBriefFromSummaries(summaryTexts);
@@ -484,7 +523,10 @@ export async function buildContextPack({
   tokenBudget = DEFAULT_CONTEXT_TOKEN_BUDGET,
   topK = 4,
 }) {
-  const [profile, brief, lastSummary] = await Promise.all([
+  const [user, profile, brief, lastSummary] = await Promise.all([
+    User.findById(userId)
+      .select('name birthDate sport competitionType level goalT')
+      .lean(),
     UserProfile.findOne({ userId }).lean(),
     LongTermBrief.findOne({ userId }).lean(),
     SessionSummary.findOne({ userId }).sort({ date: -1 }).lean(),
@@ -547,42 +589,89 @@ export async function buildContextPack({
     'Hacer seguimiento real: si hay acuerdos/tareas, preguntar por resultados de forma corta.',
   ];
 
+  // --- MERGE: User (cuenta) + UserProfile (coach) ---
+  const merged = {
+    name: firstNonEmpty(profile?.displayName, user?.name),
+    age: computeAge(user?.birthDate),
+    sport: firstNonEmpty(profile?.sport, user?.sport),
+    role: firstNonEmpty(profile?.role),
+    level: firstNonEmpty(profile?.level, user?.level),
+    competitionType: firstNonEmpty(user?.competitionType),
+    goalT: firstNonEmpty(user?.goalT),
+    goals: Array.isArray(profile?.goals) ? profile.goals : [],
+    competitionContext: firstNonEmpty(profile?.competitionContext),
+    preferences: Array.isArray(profile?.preferences) ? profile.preferences : [],
+    restrictions: Array.isArray(profile?.restrictions) ? profile.restrictions : [],
+    stableFacts: Array.isArray(profile?.stableFacts) ? profile.stableFacts : [],
+    historyNotes: Array.isArray(profile?.historyNotes) ? profile.historyNotes : [],
+  };
+
+  const missingFields = computeMissingProfileFields(merged);
+
   const userProfileLines = [];
-  if (profile?.sport) userProfileLines.push(`- Deporte: ${profile.sport}`);
-  if (profile?.role) userProfileLines.push(`- Rol/posición: ${profile.role}`);
-  if (profile?.level) userProfileLines.push(`- Nivel: ${profile.level}`);
-  if (profile?.goals?.length)
-    userProfileLines.push(`- Objetivos: ${profile.goals.join('; ')}`);
-  if (profile?.competitionContext)
-    userProfileLines.push(
-      `- Contexto competitivo: ${profile.competitionContext}`
-    );
-  if (profile?.preferences?.length)
-    userProfileLines.push(`- Preferencias: ${profile.preferences.join('; ')}`);
-  if (profile?.restrictions?.length)
-    userProfileLines.push(
-      `- Restricciones: ${profile.restrictions.join('; ')}`
-    );
-  if (profile?.stableFacts?.length)
-    userProfileLines.push(
-      `- Hechos estables: ${profile.stableFacts.join('; ')}`
-    );
-  if (profile?.historyNotes?.length)
-    userProfileLines.push(
-      `- Notas históricas: ${profile.historyNotes.join('; ')}`
-    );
+  userProfileLines.push(`- Nombre: ${merged.name || '(desconocido)'}`);
+  userProfileLines.push(
+    `- Edad: ${merged.age != null ? String(merged.age) : '(desconocida)'}`
+  );
+  userProfileLines.push(`- Deporte: ${merged.sport || '(desconocido)'}`);
+  if (merged.role) userProfileLines.push(`- Rol/posición: ${merged.role}`);
+  userProfileLines.push(`- Nivel: ${merged.level || '(desconocido)'}`);
+  if (merged.competitionType) {
+    userProfileLines.push(`- Tipo de competencia: ${merged.competitionType}`);
+  }
+
+  const goalsCombined = [];
+  if (merged.goalT) goalsCombined.push(merged.goalT);
+  if (Array.isArray(merged.goals) && merged.goals.length) {
+    goalsCombined.push(...merged.goals);
+  }
+  if (goalsCombined.length) {
+    userProfileLines.push(`- Objetivos: ${goalsCombined.join('; ')}`);
+  }
+
+  if (merged.competitionContext) {
+    userProfileLines.push(`- Contexto competitivo: ${merged.competitionContext}`);
+  }
+  if (merged.preferences.length) {
+    userProfileLines.push(`- Preferencias: ${merged.preferences.join('; ')}`);
+  }
+  if (merged.restrictions.length) {
+    userProfileLines.push(`- Restricciones: ${merged.restrictions.join('; ')}`);
+  }
+  if (merged.stableFacts.length) {
+    userProfileLines.push(`- Hechos estables: ${merged.stableFacts.join('; ')}`);
+  }
+  if (merged.historyNotes.length) {
+    userProfileLines.push(`- Notas históricas: ${merged.historyNotes.join('; ')}`);
+  }
+
+  const onboardingRules = [
+    'Si faltan datos de perfil, pedir SOLO 1 dato por respuesta (máx 2 si el usuario está charlando y no trajo un tema).',
+    'Orden de prioridad para completar perfil: name → sport → level → goal.',
+    'Si el usuario viene con un problema urgente, primero ayudar y al final pedir 1 dato faltante.',
+    'No inventar datos. Solo marcar como “confirmado” cuando el usuario lo diga explícitamente.',
+  ];
 
   const lastSummaryLines = [];
   if (lastSummary) {
-    if (lastSummary.contexto) lastSummaryLines.push(`- Contexto: ${lastSummary.contexto}`);
-    if (lastSummary.tema_principal) lastSummaryLines.push(`- Tema principal: ${lastSummary.tema_principal}`);
-    if (lastSummary.problema_clave) lastSummaryLines.push(`- Problema clave: ${lastSummary.problema_clave}`);
+    if (lastSummary.contexto)
+      lastSummaryLines.push(`- Contexto: ${lastSummary.contexto}`);
+    if (lastSummary.tema_principal)
+      lastSummaryLines.push(`- Tema principal: ${lastSummary.tema_principal}`);
+    if (lastSummary.problema_clave)
+      lastSummaryLines.push(`- Problema clave: ${lastSummary.problema_clave}`);
     if (lastSummary.plan_accion?.length)
-      lastSummaryLines.push(`- Plan acción: ${lastSummary.plan_accion.join('; ')}`);
+      lastSummaryLines.push(
+        `- Plan acción: ${lastSummary.plan_accion.join('; ')}`
+      );
     if (lastSummary.acuerdos_tareas?.length)
-      lastSummaryLines.push(`- Acuerdos/tareas: ${lastSummary.acuerdos_tareas.join('; ')}`);
+      lastSummaryLines.push(
+        `- Acuerdos/tareas: ${lastSummary.acuerdos_tareas.join('; ')}`
+      );
     if (lastSummary.seguimiento_proximo?.length)
-      lastSummaryLines.push(`- Seguimiento próximo: ${lastSummary.seguimiento_proximo.join('; ')}`);
+      lastSummaryLines.push(
+        `- Seguimiento próximo: ${lastSummary.seguimiento_proximo.join('; ')}`
+      );
   }
 
   const briefLines = brief?.text
@@ -609,6 +698,10 @@ export async function buildContextPack({
   let contextPack = [
     'USER_PROFILE:',
     userProfileLines.length ? userProfileLines.join('\n') : '- (sin datos)',
+    'MISSING_PROFILE_FIELDS:',
+    missingFields.length ? `- ${missingFields.join(', ')}` : '- (completo)',
+    'PROFILE_ONBOARDING_RULES:',
+    onboardingRules.map((r) => `- ${r}`).join('\n'),
     'LONG_TERM_BRIEF:',
     briefLines.length ? briefLines.join('\n') : '- (sin datos)',
     'LAST_SESSION_SUMMARY:',
@@ -649,13 +742,20 @@ export async function detectTopicShift({
   newText,
   threshold = parseFloat(process.env.DAN_TOPIC_SHIFT_THRESHOLD || '0.78'),
 }) {
-  const embedding = await createEmbedding(newText);
+  const embedding = await getTextEmbedding(newText);
 
-  if (!previousEmbedding || !Array.isArray(previousEmbedding) || !previousEmbedding.length) {
+  if (
+    !previousEmbedding ||
+    !Array.isArray(previousEmbedding) ||
+    !previousEmbedding.length
+  ) {
     return { shifted: false, similarity: 1, newEmbedding: embedding.vector };
   }
 
   const similarity = cosineSimilarity(previousEmbedding, embedding.vector);
-  return { shifted: similarity < threshold, similarity, newEmbedding: embedding.vector };
+  return {
+    shifted: similarity < threshold,
+    similarity,
+    newEmbedding: embedding.vector,
+  };
 }
-
