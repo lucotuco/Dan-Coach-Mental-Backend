@@ -3,6 +3,7 @@ import { Router } from 'express';
 import {
   getRealtimeClientSecret,
   postTopicShiftCheck,
+  postRealtimeSessionSave,
   postRealtimeSessionEnd,
   saveRealtimeSessionSummary,
   getRealtimeSessions,
@@ -11,22 +12,19 @@ import {
 
 const router = Router();
 
-// GET /api/realtime/client-secret
 router.get('/client-secret', getRealtimeClientSecret);
-
-// POST /api/realtime/topic-shift
 router.post('/topic-shift', postTopicShiftCheck);
 
-// POST /api/realtime/session-end (pipeline completo)
+// ✅ autosave sin OpenAI
+router.post('/session-save', postRealtimeSessionSave);
+
+// ✅ final con pipeline OpenAI
 router.post('/session-end', postRealtimeSessionEnd);
 
-// Compat tool vieja (si todavía la llamás)
+// Compat tool vieja
 router.post('/sessions', saveRealtimeSessionSummary);
 
-// GET /api/realtime/sessions
 router.get('/sessions', getRealtimeSessions);
-
-// GET /api/realtime/checkups
 router.get('/checkups', getRealtimeCheckups);
 
 export default router;

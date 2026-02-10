@@ -3,10 +3,10 @@ import crypto from 'crypto';
 import { CoachSession } from '../models/CoachSession.js';
 import { Chequeo } from '../models/Chequeo.js';
 import { getCachedMemory, setCachedMemory } from '../services/memoryCache.js';
+import { upsertSessionTranscript } from '../services/sessionTranscriptStore.js';
 import {
   buildContextPack,
   detectTopicShift,
-  saveSessionTranscript,
   createSessionSummary,
   updateUserProfileFromTranscript,
   createMemoryItemsFromSummary,
@@ -128,7 +128,6 @@ export const getRealtimeClientSecret = async (req, res) => {
 /**
  * POST /api/realtime/topic-shift
  * Body: { sessionId, text }
- * - se llama desde el front cuando llega un turno FINAL
  */
 export const postTopicShiftCheck = async (req, res) => {
   try {
@@ -198,8 +197,45 @@ export const postTopicShiftCheck = async (req, res) => {
 };
 
 /**
+ * POST /api/realtime/session-save
+ * Body: { sessionId, transcript, metadata? }
+ * - autosave: NO llama OpenAI, solo persiste transcript (upsert)
+ */
+export const postRealtimeSessionSave = async (req, res) => {
+  try {
+    const userId = getAuthUserId(req);
+    if (!userId) return res.status(401).json({ message: 'No autorizado.' });
+
+    const { sessionId, transcript, metadata } = req.body || {};
+    if (!sessionId || !transcript) {
+      return res.status(400).json({ message: 'Faltan sessionId o transcript en el body.' });
+    }
+
+    const saved = await upsertSessionTranscript({
+      userId,
+      sessionId: String(sessionId),
+      transcript: String(transcript),
+      metadata: { ...(metadata || {}), channel: 'realtime', kind: 'autosave' },
+    });
+
+    console.log('[DAN realtime][SAVE] autosave ok', {
+      userId: String(userId),
+      sessionId: String(sessionId),
+      chars: String(transcript).length,
+      transcriptId: String(saved._id),
+    });
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('Error en postRealtimeSessionSave:', err);
+    return res.status(500).json({ message: 'Error interno en autosave realtime' });
+  }
+};
+
+/**
  * POST /api/realtime/session-end
  * Body: { sessionId, transcript, metadata?, forceLongTerm? }
+ * - finaliza: llama OpenAI (summary/profile/memory)
  */
 export const postRealtimeSessionEnd = async (req, res, next) => {
   try {
@@ -211,16 +247,27 @@ export const postRealtimeSessionEnd = async (req, res, next) => {
       return res.status(400).json({ message: 'Faltan sessionId o transcript en el body.' });
     }
 
-    await saveSessionTranscript({
+    // 1) upsert del transcript “crudo”
+    await upsertSessionTranscript({
       userId,
-      sessionId,
-      transcript,
-      metadata: { ...(metadata || {}), channel: 'realtime' },
+      sessionId: String(sessionId),
+      transcript: String(transcript),
+      metadata: { ...(metadata || {}), channel: 'realtime', kind: 'final_input' },
     });
 
-    const summaryDoc = await createSessionSummary({ userId, sessionId, transcript });
+    // 2) sessionId FINAL para el pipeline (evita “existing summary” stale si hubo autosaves)
+    const finalSessionId = `${String(sessionId)}:final`;
+
+    await upsertSessionTranscript({
+      userId,
+      sessionId: finalSessionId,
+      transcript: String(transcript),
+      metadata: { ...(metadata || {}), channel: 'realtime', kind: 'final' },
+    });
+
+    const summaryDoc = await createSessionSummary({ userId, sessionId: finalSessionId, transcript });
     const profileResult = await updateUserProfileFromTranscript({ userId, transcript });
-    const memoryResult = await createMemoryItemsFromSummary({ userId, sessionId, summary: summaryDoc });
+    const memoryResult = await createMemoryItemsFromSummary({ userId, sessionId: finalSessionId, summary: summaryDoc });
     const longTermResult = await refreshLongTermBriefIfNeeded({ userId, force: Boolean(forceLongTerm) });
 
     await CoachSession.create({
@@ -230,6 +277,15 @@ export const postRealtimeSessionEnd = async (req, res, next) => {
       puntosClave: Array.isArray(summaryDoc?.acuerdos_tareas) ? summaryDoc.acuerdos_tareas : [],
       proximoPaso: Array.isArray(summaryDoc?.plan_accion) && summaryDoc.plan_accion.length ? summaryDoc.plan_accion[0] : '',
       modelo: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
+    });
+
+    console.log('[DAN realtime][END] saved', {
+      userId: String(userId),
+      sessionId: String(sessionId),
+      finalSessionId,
+      user_profile_updated: profileResult.updated,
+      memory_items_created: memoryResult.created,
+      long_term_brief_updated: longTermResult.updated,
     });
 
     return res.status(201).json({
@@ -273,9 +329,6 @@ export const saveRealtimeSessionSummary = async (req, res) => {
   }
 };
 
-/**
- * GET /api/realtime/sessions
- */
 export const getRealtimeSessions = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
@@ -314,9 +367,6 @@ export const getRealtimeSessions = async (req, res) => {
   }
 };
 
-/**
- * GET /api/realtime/checkups
- */
 export const getRealtimeCheckups = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
