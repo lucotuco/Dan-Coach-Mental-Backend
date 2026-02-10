@@ -43,6 +43,23 @@ async function maybeRunTextMemoryPipeline({ userId, conversationId }) {
   });
 }
 
+async function logConversationPendingState(conversationId, label) {
+  const enabled = String(process.env.DAN_TEXT_PENDING_DEBUG || 'true').toLowerCase() === 'true';
+  if (!enabled) return;
+
+  const dbg = await DanConversation.findById(conversationId)
+    .select('pendingMemoryFlush lastMessageAt lastFlushedAt lastFlushReason')
+    .lean();
+
+  console.log(`[DAN][TEXT][PENDING][${label}]`, {
+    conversationId: String(conversationId),
+    pendingMemoryFlush: dbg?.pendingMemoryFlush,
+    lastMessageAt: dbg?.lastMessageAt,
+    lastFlushedAt: dbg?.lastFlushedAt,
+    lastFlushReason: dbg?.lastFlushReason,
+  });
+}
+
 export async function chatWithDanController(req, res, next) {
   try {
     const authUserId = getAuthUserId(req);
@@ -79,17 +96,13 @@ export async function chatWithDanController(req, res, next) {
       text: String(message),
     });
 
-    // ✅ Marcar conversación como pending para flush (robusto ante cierre de app)
+    // ✅ Marcar conversación como pending para flush
     await DanConversation.findByIdAndUpdate(
       conversation._id,
-      {
-        $set: {
-          pendingMemoryFlush: true,
-          lastMessageAt: new Date(),
-        },
-      },
+      { $set: { pendingMemoryFlush: true, lastMessageAt: new Date() } },
       { new: false }
     );
+    await logConversationPendingState(conversation._id, 'after_user_message');
 
     const chequeos = await Chequeo.find({ owner: authUserId }).sort({ fecha: -1 }).limit(5).lean();
 
@@ -140,6 +153,7 @@ export async function chatWithDanController(req, res, next) {
       { $set: { pendingMemoryFlush: true, lastMessageAt: new Date() } },
       { new: false }
     );
+    await logConversationPendingState(conversation._id, 'after_assistant_message');
 
     // ✅ Trigger por N turnos (auto)
     const pipeline = await maybeRunTextMemoryPipeline({
@@ -147,7 +161,7 @@ export async function chatWithDanController(req, res, next) {
       conversationId: conversation._id,
     });
 
-    // ✅ Trigger por inactividad (auto) - aunque el usuario cierre la app
+    // ✅ Trigger por inactividad (auto)
     scheduleTextMemoryFlush({
       userId: authUserId,
       conversationId: conversation._id,

@@ -41,8 +41,7 @@ function formatSummaryForLog(summaryDoc) {
   const tareas = Array.isArray(summaryDoc.acuerdos_tareas) ? summaryDoc.acuerdos_tareas : [];
   const prox = Array.isArray(summaryDoc.seguimiento_proximo) ? summaryDoc.seguimiento_proximo : [];
   const tags = Array.isArray(summaryDoc.tags) ? summaryDoc.tags : [];
-  const conf =
-    typeof summaryDoc.confidence === 'number' ? summaryDoc.confidence : undefined;
+  const conf = typeof summaryDoc.confidence === 'number' ? summaryDoc.confidence : undefined;
 
   const lines = [];
   if (contexto) lines.push(`Contexto: ${contexto}`);
@@ -58,28 +57,21 @@ function formatSummaryForLog(summaryDoc) {
   return lines.join('\n');
 }
 
-/**
- * ✅ CLAVE: en texto, flushear “lo nuevo desde el último flush”, no “los últimos N mensajes”.
- * - Usa DanConversation.lastFlushedAt como watermark.
- * - Si nunca flusheó, usa desde inicio.
- */
 export async function flushConversationMemory({
   userId,
   conversationId,
   reason = 'idle_flush',
-  batchUserTurns = 6, // mantiene compat con tus settings
+  batchUserTurns = 6, // se mantiene por compat
   minUserTurns = 2,
 }) {
   const convoId = safeObjectId(conversationId);
   if (!convoId) return { ran: false, error: 'conversationId inválido' };
 
-  const { enabled: LOG_ENABLED, maxChars: LOG_MAX, transcriptChars: LOG_TRX } =
-    getFlushLogConfig();
+  const { enabled: LOG_ENABLED, maxChars: LOG_MAX, transcriptChars: LOG_TRX } = getFlushLogConfig();
 
   const convo = await DanConversation.findById(convoId).select('lastFlushedAt').lean();
   const watermark = convo?.lastFlushedAt ? new Date(convo.lastFlushedAt) : new Date(0);
 
-  // “userTurns” global (para reglas minUserTurns)
   const totalUserTurns = await DanMessage.countDocuments({
     conversationId: convoId,
     role: 'user',
@@ -97,8 +89,8 @@ export async function flushConversationMemory({
     return { ran: false, reason: 'not_enough_user_turns', userTurns: totalUserTurns };
   }
 
-  // Mensajes NUEVOS desde watermark
   const maxMessages = parseInt(process.env.DAN_TEXT_FLUSH_MAX_MESSAGES || '200', 10);
+
   const newMsgs = await DanMessage.find({
     conversationId: convoId,
     createdAt: { $gt: watermark },
@@ -108,7 +100,6 @@ export async function flushConversationMemory({
     .select('role text createdAt')
     .lean();
 
-  // Si no hay nada nuevo, no hagas nada (evita “flush vacío” cada minuto)
   if (!newMsgs.length) {
     if (LOG_ENABLED) {
       console.log('[DAN][FLUSH][SKIP] no new messages since lastFlushedAt', {
@@ -120,10 +111,8 @@ export async function flushConversationMemory({
     return { ran: false, reason: 'no_new_messages', userTurns: totalUserTurns };
   }
 
-  // transcript de lo nuevo
   const transcript = buildTranscriptFromMessages(newMsgs);
 
-  // sessionId único (evita colisiones por userTurns)
   const sessionId = `text:${String(convoId)}:${Date.now()}:${reason}`;
   const metadata = {
     channel: 'text',
@@ -131,7 +120,6 @@ export async function flushConversationMemory({
     reason,
     watermark: watermark.toISOString(),
     newMessages: newMsgs.length,
-    // dejo estos por compat/debug
     totalUserTurns,
     batchUserTurns: Math.max(parseInt(batchUserTurns, 10) || 6, 2),
   };
@@ -143,9 +131,6 @@ export async function flushConversationMemory({
   const longTermResult = await refreshLongTermBriefIfNeeded({ userId, force: false });
 
   if (LOG_ENABLED) {
-    const trxSnippet = transcript.slice(0, LOG_TRX);
-    const summaryText = formatSummaryForLog(summaryDoc).slice(0, LOG_MAX);
-
     console.log('================ [DAN][FLUSH] ================');
     console.log('[DAN][FLUSH] meta:', {
       conversationId: String(convoId),
@@ -159,18 +144,17 @@ export async function flushConversationMemory({
       memoryItemsCreated: memoryResult?.created ?? 0,
       longTermBriefUpdated: Boolean(longTermResult?.updated),
     });
-    console.log('[DAN][FLUSH] transcript_snippet:\n', trxSnippet);
-    console.log('[DAN][FLUSH] summary:\n', summaryText);
+    console.log('[DAN][FLUSH] transcript_snippet:\n', transcript.slice(0, LOG_TRX));
+    console.log('[DAN][FLUSH] summary:\n', formatSummaryForLog(summaryDoc).slice(0, LOG_MAX));
     console.log('============== [DAN][FLUSH END] ==============');
   }
 
-  // ✅ watermark avanza: lastFlushedAt = now
   await DanConversation.findByIdAndUpdate(
     convoId,
     {
       $set: {
         pendingMemoryFlush: false,
-        lastFlushedAt: new Date(),
+        lastFlushedAt: new Date(), // watermark avanza
         lastFlushReason: reason,
         lastFlushUserTurns: totalUserTurns,
       },
@@ -191,9 +175,6 @@ export async function flushConversationMemory({
   };
 }
 
-/**
- * Debounce en memoria: cada nuevo mensaje reprograma el flush.
- */
 const timers = new Map();
 const locks = new Set();
 
@@ -247,9 +228,6 @@ export function scheduleTextMemoryFlush({
   timers.set(key, timeoutId);
 }
 
-/**
- * Reconciler: procesa conversaciones pendientes y “viejas”.
- */
 export async function runPendingTextFlushes({
   idleMs = 90_000,
   batchUserTurns = 6,
@@ -257,6 +235,39 @@ export async function runPendingTextFlushes({
   limit = 25,
 } = {}) {
   const cutoff = new Date(Date.now() - idleMs);
+
+  const { enabled: LOG_ENABLED } = getFlushLogConfig();
+
+  // 🔎 Diagnóstico: ¿existen pending en BD?
+  if (LOG_ENABLED) {
+    const totalPending = await DanConversation.countDocuments({ pendingMemoryFlush: true });
+    const pendingNoLastMessageAt = await DanConversation.countDocuments({
+      pendingMemoryFlush: true,
+      lastMessageAt: { $exists: false },
+    });
+    const pendingNullLastMessageAt = await DanConversation.countDocuments({
+      pendingMemoryFlush: true,
+      lastMessageAt: null,
+    });
+
+    const sample = await DanConversation.findOne({ pendingMemoryFlush: true })
+      .select('_id userId lastMessageAt lastFlushedAt')
+      .lean();
+
+    console.log('[DAN][FLUSH][RECONCILER] debug pending counts:', {
+      totalPending,
+      pendingNoLastMessageAt,
+      pendingNullLastMessageAt,
+      sample: sample
+        ? {
+            _id: String(sample._id),
+            userId: String(sample.userId),
+            lastMessageAt: sample.lastMessageAt,
+            lastFlushedAt: sample.lastFlushedAt,
+          }
+        : null,
+    });
+  }
 
   const pending = await DanConversation.find({
     pendingMemoryFlush: true,
@@ -284,7 +295,6 @@ export async function runPendingTextFlushes({
     }
   }
 
-  const { enabled: LOG_ENABLED } = getFlushLogConfig();
   if (LOG_ENABLED) {
     console.log('[DAN][FLUSH][RECONCILER] summary:', {
       cutoff: cutoff.toISOString(),
