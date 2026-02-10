@@ -13,6 +13,7 @@ import { connectToDatabase } from './config/mongo.js';
 import { authMiddleware } from './middleware/authMiddleware.js';
 
 import { runPendingTextFlushes } from './services/textMemoryScheduler.js';
+import { runPendingRealtimeFinalizations } from './services/realtimeReconciler.js';
 
 dotenv.config();
 
@@ -25,14 +26,10 @@ app.use(morgan('dev'));
 
 /**
  * ✅ CORS robusto (NO wildcard con credenciales)
- *
- * Env recomendado:
- * - CORS_ORIGINS="http://localhost:8081,https://tu-frontend.com"
- * - CORS_ALLOW_CREDENTIALS="true"
  */
 function parseAllowedOrigins() {
   const raw = (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || '').trim();
-  if (!raw) return []; // si no seteas nada, no permitimos cross-origin (más seguro)
+  if (!raw) return [];
   return raw
     .split(',')
     .map((s) => s.trim())
@@ -44,17 +41,13 @@ const ALLOW_CREDENTIALS = String(process.env.CORS_ALLOW_CREDENTIALS || 'true').t
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-
-  // Si no viene Origin (curl/postman/server-to-server), seguimos normal
   if (!origin) return next();
 
   let allowOrigin = null;
 
-  // Permitir explícitamente si está en la allowlist
   if (ALLOWED_ORIGINS.length > 0) {
     if (ALLOWED_ORIGINS.includes(origin)) allowOrigin = origin;
   } else {
-    // Si no configuraste allowlist, por compatibilidad permitimos el origin actual SOLO en dev local
     if (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
       allowOrigin = origin;
     }
@@ -62,28 +55,17 @@ app.use((req, res, next) => {
 
   if (allowOrigin) {
     res.header('Access-Control-Allow-Origin', allowOrigin);
-    res.header('Vary', 'Origin'); // importante para caches/CDNs
+    res.header('Vary', 'Origin');
 
     if (ALLOW_CREDENTIALS) {
       res.header('Access-Control-Allow-Credentials', 'true');
     }
 
-    // Headers permitidos
-    res.header(
-      'Access-Control-Allow-Headers',
-      'Content-Type, Authorization'
-    );
-
-    // Métodos permitidos
-    res.header(
-      'Access-Control-Allow-Methods',
-      'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS'
-    );
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.header('Access-Control-Allow-Methods', 'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS');
   }
 
-  // Preflight
   if (req.method === 'OPTIONS') {
-    // Si no está permitido, devolvemos 403 (así ves el problema rápido)
     if (!allowOrigin) return res.sendStatus(403);
     return res.sendStatus(204);
   }
@@ -91,15 +73,13 @@ app.use((req, res, next) => {
   return next();
 });
 
-// Auth global (con whitelist en authMiddleware)
+// Auth global (con whitelist dentro de authMiddleware)
 app.use(authMiddleware);
 
-// raíz simple (queda pública por authMiddleware whitelist)
 app.get('/', (req, res) => {
   res.type('text/plain').send('ok');
 });
 
-// health
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
@@ -119,7 +99,7 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 async function bootstrap() {
   await connectToDatabase(MONGODB_URI);
 
-  // ✅ Reconciler inicial
+  // -------- TEXT reconciler (ya lo tenías) --------
   try {
     const idleMs = parseInt(process.env.DAN_TEXT_IDLE_FLUSH_MS || '90000', 10);
     const batchUserTurns = parseInt(process.env.DAN_TEXT_SUMMARY_EVERY_N_TURNS || '6', 10);
@@ -131,14 +111,13 @@ async function bootstrap() {
       minUserTurns,
       limit: parseInt(process.env.DAN_TEXT_RECONCILER_LIMIT || '25', 10),
     });
-    console.log('[reconciler] pending flushes:', result);
+    console.log('[TEXT reconciler] boot:', result);
   } catch (e) {
-    console.error('[reconciler] error on boot:', e);
+    console.error('[TEXT reconciler] boot error:', e);
   }
 
-  // ✅ Reconciler periódico
-  const intervalMs = parseInt(process.env.DAN_TEXT_RECONCILER_INTERVAL_MS || '60000', 10);
-  if (intervalMs > 0) {
+  const textIntervalMs = parseInt(process.env.DAN_TEXT_RECONCILER_INTERVAL_MS || '60000', 10);
+  if (textIntervalMs > 0) {
     setInterval(async () => {
       try {
         const idleMs = parseInt(process.env.DAN_TEXT_IDLE_FLUSH_MS || '90000', 10);
@@ -151,13 +130,41 @@ async function bootstrap() {
           minUserTurns,
           limit: parseInt(process.env.DAN_TEXT_RECONCILER_LIMIT || '25', 10),
         });
-        if (result.ran > 0) {
-          console.log('[reconciler] ran:', result);
+        if (result.ran > 0) console.log('[TEXT reconciler] ran:', result);
+      } catch (e) {
+        console.error('[TEXT reconciler] periodic error:', e);
+      }
+    }, textIntervalMs);
+  }
+
+  // -------- REALTIME reconciler (NUEVO) --------
+  try {
+    const idleMs = parseInt(process.env.DAN_REALTIME_IDLE_FINALIZE_MS || '90000', 10);
+    const limit = parseInt(process.env.DAN_REALTIME_RECONCILER_LIMIT || '25', 10);
+    const forceLongTerm = String(process.env.DAN_REALTIME_RECONCILER_FORCE_LONGTERM || 'false').toLowerCase() === 'true';
+
+    const result = await runPendingRealtimeFinalizations({ idleMs, limit, forceLongTerm });
+    console.log('[REALTIME reconciler] boot:', result);
+  } catch (e) {
+    console.error('[REALTIME reconciler] boot error:', e);
+  }
+
+  const rtIntervalMs = parseInt(process.env.DAN_REALTIME_RECONCILER_INTERVAL_MS || '60000', 10);
+  if (rtIntervalMs > 0) {
+    setInterval(async () => {
+      try {
+        const idleMs = parseInt(process.env.DAN_REALTIME_IDLE_FINALIZE_MS || '90000', 10);
+        const limit = parseInt(process.env.DAN_REALTIME_RECONCILER_LIMIT || '25', 10);
+        const forceLongTerm = String(process.env.DAN_REALTIME_RECONCILER_FORCE_LONGTERM || 'false').toLowerCase() === 'true';
+
+        const result = await runPendingRealtimeFinalizations({ idleMs, limit, forceLongTerm });
+        if (result.finalized > 0 || result.errors > 0) {
+          console.log('[REALTIME reconciler] tick:', result);
         }
       } catch (e) {
-        console.error('[reconciler] periodic error:', e);
+        console.error('[REALTIME reconciler] periodic error:', e);
       }
-    }, intervalMs);
+    }, rtIntervalMs);
   }
 
   app.listen(PORT, () => {

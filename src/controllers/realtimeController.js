@@ -1,7 +1,11 @@
 // src/controllers/realtimeController.js
 import crypto from 'crypto';
+import mongoose from 'mongoose';
 import { CoachSession } from '../models/CoachSession.js';
 import { Chequeo } from '../models/Chequeo.js';
+import { RealtimeSessionState } from '../models/RealtimeSessionState.js';
+import { SessionTranscript } from '../models/SessionTranscript.js';
+
 import { getCachedMemory, setCachedMemory } from '../services/memoryCache.js';
 import { upsertSessionTranscript } from '../services/sessionTranscriptStore.js';
 import {
@@ -34,6 +38,82 @@ function getAuthUserId(req) {
 
 function buildRealtimeInstructions(base, contextPack) {
   return base + (contextPack ? `\n\n=== CONTEXT_PACK (personalización + memoria) ===\n${contextPack}\n=== FIN CONTEXT_PACK ===\n` : '');
+}
+
+function oid(id) {
+  return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : id;
+}
+
+async function upsertRealtimeState({
+  userId,
+  sessionId,
+  metadata = {},
+  touchActivity = true,
+  touchAutosave = false,
+  status = 'open',
+}) {
+  const now = new Date();
+  const update = {
+    $setOnInsert: { userId: oid(userId), sessionId: String(sessionId) },
+    $set: {
+      status,
+      metadata: { ...(metadata || {}) },
+    },
+  };
+
+  if (touchActivity) update.$set.lastActivityAt = now;
+  if (touchAutosave) update.$set.lastAutosaveAt = now;
+
+  const doc = await RealtimeSessionState.findOneAndUpdate(
+    { userId: oid(userId), sessionId: String(sessionId) },
+    update,
+    { new: true, upsert: true }
+  );
+
+  return doc;
+}
+
+async function finalizeRealtimePipeline({
+  userId,
+  sessionId,
+  transcript,
+  metadata = {},
+  forceLongTerm = false,
+  finalizedBy = 'client',
+}) {
+  // sessionId FINAL para el pipeline
+  const finalSessionId = `${String(sessionId)}:final`;
+
+  // Guardamos también el finalSessionId como transcript “final”
+  await upsertSessionTranscript({
+    userId,
+    sessionId: finalSessionId,
+    transcript: String(transcript),
+    metadata: { ...(metadata || {}), channel: 'realtime', kind: 'final' },
+  });
+
+  const summaryDoc = await createSessionSummary({ userId, sessionId: finalSessionId, transcript });
+  const profileResult = await updateUserProfileFromTranscript({ userId, transcript });
+  const memoryResult = await createMemoryItemsFromSummary({ userId, sessionId: finalSessionId, summary: summaryDoc });
+  const longTermResult = await refreshLongTermBriefIfNeeded({ userId, force: Boolean(forceLongTerm) });
+
+  await CoachSession.create({
+    owner: userId,
+    canal: 'realtime',
+    resumen: summaryDoc?.contexto || '',
+    puntosClave: Array.isArray(summaryDoc?.acuerdos_tareas) ? summaryDoc.acuerdos_tareas : [],
+    proximoPaso: Array.isArray(summaryDoc?.plan_accion) && summaryDoc.plan_accion.length ? summaryDoc.plan_accion[0] : '',
+    modelo: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
+  });
+
+  return {
+    finalSessionId,
+    summaryDoc,
+    profileResult,
+    memoryResult,
+    longTermResult,
+    finalizedBy,
+  };
 }
 
 /**
@@ -199,7 +279,7 @@ export const postTopicShiftCheck = async (req, res) => {
 /**
  * POST /api/realtime/session-save
  * Body: { sessionId, transcript, metadata? }
- * - autosave: NO llama OpenAI, solo persiste transcript (upsert)
+ * - autosave: NO llama OpenAI, solo persiste transcript (upsert) y toca lastActivityAt
  */
 export const postRealtimeSessionSave = async (req, res) => {
   try {
@@ -216,6 +296,16 @@ export const postRealtimeSessionSave = async (req, res) => {
       sessionId: String(sessionId),
       transcript: String(transcript),
       metadata: { ...(metadata || {}), channel: 'realtime', kind: 'autosave' },
+    });
+
+    // ✅ Upsert state: marca actividad para que el reconciler pueda cerrar por silencio
+    await upsertRealtimeState({
+      userId,
+      sessionId: String(sessionId),
+      metadata: { ...(metadata || {}), channel: 'realtime', kind: 'autosave' },
+      touchActivity: true,
+      touchAutosave: true,
+      status: 'open',
     });
 
     console.log('[DAN realtime][SAVE] autosave ok', {
@@ -255,45 +345,46 @@ export const postRealtimeSessionEnd = async (req, res, next) => {
       metadata: { ...(metadata || {}), channel: 'realtime', kind: 'final_input' },
     });
 
-    // 2) sessionId FINAL para el pipeline (evita “existing summary” stale si hubo autosaves)
-    const finalSessionId = `${String(sessionId)}:final`;
-
-    await upsertSessionTranscript({
+    // 2) pipeline completo
+    const result = await finalizeRealtimePipeline({
       userId,
-      sessionId: finalSessionId,
+      sessionId: String(sessionId),
       transcript: String(transcript),
       metadata: { ...(metadata || {}), channel: 'realtime', kind: 'final' },
+      forceLongTerm: Boolean(forceLongTerm),
+      finalizedBy: 'client',
     });
 
-    const summaryDoc = await createSessionSummary({ userId, sessionId: finalSessionId, transcript });
-    const profileResult = await updateUserProfileFromTranscript({ userId, transcript });
-    const memoryResult = await createMemoryItemsFromSummary({ userId, sessionId: finalSessionId, summary: summaryDoc });
-    const longTermResult = await refreshLongTermBriefIfNeeded({ userId, force: Boolean(forceLongTerm) });
-
-    await CoachSession.create({
-      owner: userId,
-      canal: 'realtime',
-      resumen: summaryDoc?.contexto || '',
-      puntosClave: Array.isArray(summaryDoc?.acuerdos_tareas) ? summaryDoc.acuerdos_tareas : [],
-      proximoPaso: Array.isArray(summaryDoc?.plan_accion) && summaryDoc.plan_accion.length ? summaryDoc.plan_accion[0] : '',
-      modelo: process.env.DAN_REALTIME_MODEL || 'gpt-realtime',
-    });
+    // 3) marcar state como finalized
+    await RealtimeSessionState.findOneAndUpdate(
+      { userId: oid(userId), sessionId: String(sessionId) },
+      {
+        $set: {
+          status: 'finalized',
+          lastFinalizeAt: new Date(),
+          finalizedBy: 'client',
+          lastError: '',
+          metadata: { ...(metadata || {}), lastFinalSummaryId: String(result.summaryDoc?._id || '') },
+        },
+      },
+      { upsert: true, new: true }
+    );
 
     console.log('[DAN realtime][END] saved', {
       userId: String(userId),
       sessionId: String(sessionId),
-      finalSessionId,
-      user_profile_updated: profileResult.updated,
-      memory_items_created: memoryResult.created,
-      long_term_brief_updated: longTermResult.updated,
+      finalSessionId: result.finalSessionId,
+      user_profile_updated: result.profileResult.updated,
+      memory_items_created: result.memoryResult.created,
+      long_term_brief_updated: result.longTermResult.updated,
     });
 
     return res.status(201).json({
       ok: true,
-      session_summary_id: summaryDoc._id,
-      user_profile_updated: profileResult.updated,
-      memory_items_created: memoryResult.created,
-      long_term_brief_updated: longTermResult.updated,
+      session_summary_id: result.summaryDoc._id,
+      user_profile_updated: result.profileResult.updated,
+      memory_items_created: result.memoryResult.created,
+      long_term_brief_updated: result.longTermResult.updated,
     });
   } catch (error) {
     next(error);
