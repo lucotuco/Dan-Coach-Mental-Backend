@@ -12,6 +12,8 @@ import ttsRoutes from './routes/ttsRoutes.js';
 import { connectToDatabase } from './config/mongo.js';
 import { authMiddleware } from './middleware/authMiddleware.js';
 
+import { runPendingTextFlushes } from './services/textMemoryScheduler.js';
+
 dotenv.config();
 
 const app = express();
@@ -57,6 +59,48 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 
 async function bootstrap() {
   await connectToDatabase(MONGODB_URI);
+
+  // ✅ Reconciler inicial (por si se reinició el server y quedaron flush pendientes)
+  try {
+    const idleMs = parseInt(process.env.DAN_TEXT_IDLE_FLUSH_MS || '90000', 10);
+    const batchUserTurns = parseInt(process.env.DAN_TEXT_SUMMARY_EVERY_N_TURNS || '6', 10);
+    const minUserTurns = parseInt(process.env.DAN_TEXT_IDLE_MIN_USER_TURNS || '2', 10);
+
+    const result = await runPendingTextFlushes({
+      idleMs,
+      batchUserTurns,
+      minUserTurns,
+      limit: parseInt(process.env.DAN_TEXT_RECONCILER_LIMIT || '25', 10),
+    });
+    console.log('[reconciler] pending flushes:', result);
+  } catch (e) {
+    console.error('[reconciler] error on boot:', e);
+  }
+
+  // ✅ Reconciler periódico (opcional, recomendado)
+  const intervalMs = parseInt(process.env.DAN_TEXT_RECONCILER_INTERVAL_MS || '60000', 10);
+  if (intervalMs > 0) {
+    setInterval(async () => {
+      try {
+        const idleMs = parseInt(process.env.DAN_TEXT_IDLE_FLUSH_MS || '90000', 10);
+        const batchUserTurns = parseInt(process.env.DAN_TEXT_SUMMARY_EVERY_N_TURNS || '6', 10);
+        const minUserTurns = parseInt(process.env.DAN_TEXT_IDLE_MIN_USER_TURNS || '2', 10);
+
+        const result = await runPendingTextFlushes({
+          idleMs,
+          batchUserTurns,
+          minUserTurns,
+          limit: parseInt(process.env.DAN_TEXT_RECONCILER_LIMIT || '25', 10),
+        });
+        if (result.ran > 0) {
+          console.log('[reconciler] ran:', result);
+        }
+      } catch (e) {
+        console.error('[reconciler] periodic error:', e);
+      }
+    }, intervalMs);
+  }
+
   app.listen(PORT, () => {
     console.log(`🚀 API listening on http://localhost:${PORT}`);
   });
