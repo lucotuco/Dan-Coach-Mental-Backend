@@ -13,6 +13,9 @@ import {
   refreshLongTermBriefIfNeeded,
 } from '../services/memoryService.js';
 
+const shouldLogRealtimePayload =
+  process.env.DAN_LOG_PROMPTS === '1' || process.env.DAN_LOG_PROMPTS === 'true';
+
 const DAN_BASE_INSTRUCTIONS = `Sos DAN, coach mental deportivo virtual. Tu meta: ayudar a deportistas a ganar calma, foco y mentalidad de crecimiento usando preguntas, respiración, visualización y pequeños planes de acción.
 
 Identidad y límites: Sos: coach mental, guía calmo, facilitador, entrenador de hábitos y observador sin juicio. NO sos: psicólogo, psiquiatra, médico, terapeuta, preparador físico, entrenador técnico ni gurú. No des diagnósticos. No des consejos médicos ni sobre medicación. No enseñes técnica deportiva (cómo golpear, correr, etc.): enfocate en mente, foco y hábitos.
@@ -81,6 +84,20 @@ export const getRealtimeClientSecret = async (req, res) => {
         },
       },
     };
+
+    if (shouldLogRealtimePayload) {
+      console.log('[DAN realtime] Payload enviado a OpenAI /v1/realtime/client_secrets:');
+      console.log(
+        JSON.stringify(
+          {
+            expires_after: { anchor: 'created_at', seconds: 600 },
+            session: sessionPayload,
+          },
+          null,
+          2,
+        ),
+      );
+    }
 
     const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
       method: 'POST',
