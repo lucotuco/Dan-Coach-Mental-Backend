@@ -1,5 +1,8 @@
 import { openai } from './openaiClient.js';
 
+const shouldLogDanPayload =
+  process.env.DAN_LOG_PROMPTS === '1' || process.env.DAN_LOG_PROMPTS === 'true';
+
 const defaultSystemPrompt = `Sos DAN, coach de rendimiento deportivo. Tu objetivo es ayudar a deportistas a mejorar rendimiento con foco en:
 - estrategia y táctica (lectura del juego, decisiones, planes)
 - planificación (rutinas, objetivos, carga/descarga a nivel general; NO técnica)
@@ -120,13 +123,29 @@ export async function chatWithDan({
 
   const model = process.env.DAN_MODEL || 'gpt-4.1-mini';
   const systemPrompt = buildSystemMessage(user, conversation, chequeos, contextPack);
+  const input = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: messageText },
+  ];
+
+  if (shouldLogDanPayload) {
+    console.log('[DAN] Payload enviado a OpenAI /responses.create:');
+    console.log(
+      JSON.stringify(
+        {
+          model,
+          previous_response_id: conversation?.lastResponseId || null,
+          input,
+        },
+        null,
+        2,
+      ),
+    );
+  }
 
   const response = await openai.responses.create({
     model,
-    input: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: messageText },
-    ],
+    input,
     previous_response_id: conversation?.lastResponseId || undefined,
   });
 
