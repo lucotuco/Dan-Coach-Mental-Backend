@@ -24,6 +24,40 @@ function buildTranscriptFromMessages(messages) {
     .join('\n');
 }
 
+function getFlushLogConfig() {
+  const enabled = String(process.env.DAN_TEXT_FLUSH_LOG || 'true').toLowerCase() === 'true';
+  const maxChars = parseInt(process.env.DAN_TEXT_FLUSH_LOG_MAX_CHARS || '2500', 10);
+  const transcriptChars = parseInt(process.env.DAN_TEXT_FLUSH_LOG_TRANSCRIPT_CHARS || '1200', 10);
+  return { enabled, maxChars, transcriptChars };
+}
+
+function formatSummaryForLog(summaryDoc) {
+  if (!summaryDoc) return '(no summaryDoc)';
+  const contexto = summaryDoc.contexto || '';
+  const tema = summaryDoc.tema_principal || '';
+  const problema = summaryDoc.problema_clave || '';
+  const hipotesis = summaryDoc.hipotesis || '';
+  const plan = Array.isArray(summaryDoc.plan_accion) ? summaryDoc.plan_accion : [];
+  const tareas = Array.isArray(summaryDoc.acuerdos_tareas) ? summaryDoc.acuerdos_tareas : [];
+  const prox = Array.isArray(summaryDoc.seguimiento_proximo) ? summaryDoc.seguimiento_proximo : [];
+  const tags = Array.isArray(summaryDoc.tags) ? summaryDoc.tags : [];
+  const conf =
+    typeof summaryDoc.confidence === 'number' ? summaryDoc.confidence : undefined;
+
+  const lines = [];
+  if (contexto) lines.push(`Contexto: ${contexto}`);
+  if (tema) lines.push(`Tema: ${tema}`);
+  if (problema) lines.push(`Problema: ${problema}`);
+  if (hipotesis) lines.push(`Hipótesis: ${hipotesis}`);
+  if (plan.length) lines.push(`Plan: ${plan.join(' | ')}`);
+  if (tareas.length) lines.push(`Tareas: ${tareas.join(' | ')}`);
+  if (prox.length) lines.push(`Seguimiento: ${prox.join(' | ')}`);
+  if (tags.length) lines.push(`Tags: ${tags.join(', ')}`);
+  if (conf !== undefined) lines.push(`Confidence: ${conf}`);
+
+  return lines.join('\n');
+}
+
 /**
  * Ejecuta el pipeline “texto” usando últimos N turnos (N user turns, y hasta N*2 mensajes).
  * Deja pendingMemoryFlush=false si completó.
@@ -38,6 +72,9 @@ export async function flushConversationMemory({
   const convoId = safeObjectId(conversationId);
   if (!convoId) return { ran: false, error: 'conversationId inválido' };
 
+  const { enabled: LOG_ENABLED, maxChars: LOG_MAX, transcriptChars: LOG_TRX } =
+    getFlushLogConfig();
+
   // Evita flush sin contenido real
   const userTurns = await DanMessage.countDocuments({
     conversationId: convoId,
@@ -45,7 +82,14 @@ export async function flushConversationMemory({
   });
 
   if (userTurns < minUserTurns) {
-    // No lo marcamos como flushed; pero sí podés limpiar pending si querés.
+    if (LOG_ENABLED) {
+      console.log('[DAN][FLUSH][SKIP] not enough user turns', {
+        conversationId: String(convoId),
+        reason,
+        userTurns,
+        minUserTurns,
+      });
+    }
     return { ran: false, reason: 'not_enough_user_turns', userTurns };
   }
 
@@ -69,12 +113,36 @@ export async function flushConversationMemory({
     reason,
   };
 
+  // --- PIPELINE ---
   await saveSessionTranscript({ userId, sessionId, transcript, metadata });
   const summaryDoc = await createSessionSummary({ userId, sessionId, transcript });
   const profileResult = await updateUserProfileFromTranscript({ userId, transcript });
   const memoryResult = await createMemoryItemsFromSummary({ userId, sessionId, summary: summaryDoc });
   const longTermResult = await refreshLongTermBriefIfNeeded({ userId, force: false });
 
+  // ✅ LOG PARA CONTROL (lo que “va a guardar”)
+  if (LOG_ENABLED) {
+    const trxSnippet = transcript.slice(0, LOG_TRX);
+    const summaryText = formatSummaryForLog(summaryDoc).slice(0, LOG_MAX);
+
+    console.log('================ [DAN][FLUSH] ================');
+    console.log('[DAN][FLUSH] meta:', {
+      conversationId: String(convoId),
+      sessionId,
+      reason,
+      userTurns,
+      batchUserTurns: N,
+      summaryId: String(summaryDoc?._id || ''),
+      userProfileUpdated: Boolean(profileResult?.updated),
+      memoryItemsCreated: memoryResult?.created ?? 0,
+      longTermBriefUpdated: Boolean(longTermResult?.updated),
+    });
+    console.log('[DAN][FLUSH] transcript_snippet:\n', trxSnippet);
+    console.log('[DAN][FLUSH] summary:\n', summaryText);
+    console.log('============== [DAN][FLUSH END] ==============');
+  }
+
+  // ✅ Marcar como “ya flushed”
   await DanConversation.findByIdAndUpdate(
     convoId,
     {
@@ -128,13 +196,25 @@ export function scheduleTextMemoryFlush({
     locks.add(key);
 
     try {
-      await flushConversationMemory({
+      const result = await flushConversationMemory({
         userId,
         conversationId,
         reason: 'idle_flush',
         batchUserTurns,
         minUserTurns,
       });
+
+      // log cortito de “se ejecutó / se skippeó”
+      const { enabled: LOG_ENABLED } = getFlushLogConfig();
+      if (LOG_ENABLED) {
+        console.log('[DAN][FLUSH][IDLE] done:', {
+          conversationId: String(conversationId),
+          ran: Boolean(result?.ran),
+          reason: result?.reason || 'idle_flush',
+          userTurns: result?.userTurns,
+          sessionId: result?.sessionId,
+        });
+      }
     } catch (e) {
       console.error('[textMemoryScheduler] idle flush error:', e);
     } finally {
@@ -181,6 +261,15 @@ export async function runPendingTextFlushes({
     } catch (e) {
       console.error('[textMemoryScheduler] reconciler flush error:', e);
     }
+  }
+
+  const { enabled: LOG_ENABLED } = getFlushLogConfig();
+  if (LOG_ENABLED) {
+    console.log('[DAN][FLUSH][RECONCILER] summary:', {
+      cutoff: cutoff.toISOString(),
+      scanned: pending.length,
+      ran,
+    });
   }
 
   return { scanned: pending.length, ran };
