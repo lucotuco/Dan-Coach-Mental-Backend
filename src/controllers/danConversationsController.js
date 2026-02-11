@@ -17,7 +17,7 @@ export async function createConversation(req, res, next) {
       userId,
       type,
       chequeoId: chequeoId || undefined,
-      lastMessageAt: new Date(),
+      lastMessageAt: null,
       pendingMemoryFlush: false,
       title: '',
     });
@@ -81,7 +81,7 @@ export async function listConversations(req, res, next) {
 
     const limit = Math.min(parseInt(req.query.limit || '30', 10), 100);
 
-    const convos = await DanConversation.find({ userId })
+    const convos = await DanConversation.find({ userId, lastMessageAt: { $ne: null } })
       .sort({ lastMessageAt: -1, updatedAt: -1 })
       .limit(limit)
       .lean();
