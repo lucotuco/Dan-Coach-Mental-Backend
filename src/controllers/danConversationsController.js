@@ -17,6 +17,9 @@ export async function createConversation(req, res, next) {
       userId,
       type,
       chequeoId: chequeoId || undefined,
+      lastMessageAt: new Date(),
+      pendingMemoryFlush: false,
+      title: ''
     });
 
     return res.status(201).json({ conversationId: convo._id, type: convo.type });
@@ -34,7 +37,7 @@ export async function listConversations(req, res, next) {
     const limit = Math.min(parseInt(req.query.limit || '30', 10), 100);
 
     const convos = await DanConversation.find({ userId })
-      .sort({ updatedAt: -1 })
+      .sort({ lastMessageAt: -1, updatedAt: -1 })
       .limit(limit)
       .lean();
 
@@ -58,6 +61,7 @@ export async function listConversations(req, res, next) {
       const last = map.get(String(c._id));
       return {
         _id: c._id,
+        title: c.title || '',
         type: c.type,
         updatedAt: c.updatedAt,
         createdAt: c.createdAt,

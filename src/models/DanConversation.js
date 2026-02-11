@@ -8,22 +8,21 @@ const danConversationSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    type: {
+
+    title: {
       type: String,
-      required: true,
+      default: '',
+      index: true,
     },
-    lastResponseId: {
-      type: String,
-    },
-    historySummary: {
-      type: String,
-    },
+
+    lastResponseId: { type: String },
+    historySummary: { type: String },
+
     chequeoId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Chequeo',
     },
 
-    // ✅ Opción 1 (robusta): estado de flush de memoria
     pendingMemoryFlush: {
       type: Boolean,
       default: false,
@@ -37,21 +36,15 @@ const danConversationSchema = new mongoose.Schema(
       type: Date,
       index: true,
     },
-    lastFlushReason: {
-      type: String, // 'n_turns' | 'idle_flush' | 'reconciler'
-    },
-    lastFlushUserTurns: {
-      type: Number,
-    },
+    lastFlushReason: { type: String },
+    lastFlushUserTurns: { type: Number },
   },
   { timestamps: true }
 );
 
-// índices útiles para el reconciler
+// índices útiles
 danConversationSchema.index({ pendingMemoryFlush: 1, lastMessageAt: 1 });
 danConversationSchema.index({ userId: 1, createdAt: -1 });
+danConversationSchema.index({ userId: 1, lastMessageAt: -1 });
 
-export const DanConversation = mongoose.model(
-  'DanConversation',
-  danConversationSchema
-);
+export const DanConversation = mongoose.model('DanConversation', danConversationSchema);
