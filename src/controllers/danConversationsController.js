@@ -19,10 +19,55 @@ export async function createConversation(req, res, next) {
       chequeoId: chequeoId || undefined,
       lastMessageAt: new Date(),
       pendingMemoryFlush: false,
-      title: ''
+      title: '',
     });
 
     return res.status(201).json({ conversationId: convo._id, type: convo.type });
+  } catch (e) {
+    next(e);
+  }
+}
+
+// ✅ POST /api/dan/conversations/:id/messages -> append 1 mensaje
+export async function appendConversationMessage(req, res, next) {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ message: 'No autorizado.' });
+
+    const convoId = safeObjectId(req.params.id);
+    if (!convoId) return res.status(400).json({ message: 'conversationId inválido.' });
+
+    const { role, text, responseId } = req.body || {};
+    const cleanRole = String(role || '').trim();
+    const cleanText = String(text || '').trim();
+
+    if (!['user', 'assistant', 'system'].includes(cleanRole)) {
+      return res.status(400).json({ message: 'role inválido (user|assistant|system).' });
+    }
+    if (!cleanText) {
+      return res.status(400).json({ message: 'text es obligatorio.' });
+    }
+
+    // validar ownership
+    const convo = await DanConversation.findOne({ _id: convoId, userId });
+    if (!convo) return res.status(404).json({ message: 'Conversación no encontrada.' });
+
+    const msg = await DanMessage.create({
+      conversationId: convoId,
+      role: cleanRole,
+      text: cleanText,
+      responseId: responseId ? String(responseId) : undefined,
+    });
+
+    // actualizar actividad (para ordenar y para reconciler)
+    await DanConversation.findByIdAndUpdate(convoId, {
+      $set: {
+        lastMessageAt: new Date(),
+        pendingMemoryFlush: true,
+      },
+    });
+
+    return res.status(201).json({ ok: true, messageId: msg._id });
   } catch (e) {
     next(e);
   }
@@ -41,7 +86,7 @@ export async function listConversations(req, res, next) {
       .limit(limit)
       .lean();
 
-    // mini preview: último mensaje del usuario o asistente
+    // (aunque el front no lo muestre, lo dejo por compat)
     const ids = convos.map((c) => c._id);
     const lastMsgs = await DanMessage.aggregate([
       { $match: { conversationId: { $in: ids } } },
@@ -65,6 +110,8 @@ export async function listConversations(req, res, next) {
         type: c.type,
         updatedAt: c.updatedAt,
         createdAt: c.createdAt,
+        lastMessageAt: c.lastMessageAt || null,
+        // el front NO usa preview, pero lo dejo
         preview: last?.lastText ? String(last.lastText).slice(0, 80) : '',
         previewRole: last?.lastRole || null,
         lastAt: last?.lastAt || null,
@@ -97,7 +144,14 @@ export async function getConversationMessages(req, res, next) {
       .lean();
 
     return res.json({
-      conversation: { _id: convo._id, type: convo.type, createdAt: convo.createdAt, updatedAt: convo.updatedAt },
+      conversation: {
+        _id: convo._id,
+        type: convo.type,
+        title: convo.title || '',
+        createdAt: convo.createdAt,
+        updatedAt: convo.updatedAt,
+        lastMessageAt: convo.lastMessageAt || null,
+      },
       messages: msgs.map((m) => ({
         _id: m._id,
         role: m.role,

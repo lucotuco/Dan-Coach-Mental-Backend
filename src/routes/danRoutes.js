@@ -5,6 +5,7 @@ import {
   createConversation,
   listConversations,
   getConversationMessages,
+  appendConversationMessage, // ✅ nuevo
 } from '../controllers/danConversationsController.js';
 
 const router = Router();
@@ -14,7 +15,10 @@ router.post('/conversations', createConversation);
 router.get('/conversations', listConversations);
 router.get('/conversations/:id/messages', getConversationMessages);
 
-// Chat principal
+// ✅ Opción 1: append mensajes (lo que te faltaba)
+router.post('/conversations/:id/messages', appendConversationMessage);
+
+// Chat principal (texto “clásico” si lo seguís usando)
 router.post('/chat', chatWithDanController);
 
 // Memoria (lo tuyo)
