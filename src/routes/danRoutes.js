@@ -5,20 +5,28 @@ import {
   createConversation,
   listConversations,
   getConversationMessages,
-  appendConversationMessage, // ✅ nuevo
+  appendConversationMessage,
+  updateConversation,     // ✅ nuevo
+  deleteConversation,     // ✅ nuevo
 } from '../controllers/danConversationsController.js';
 
 const router = Router();
 
-// ✅ Conversaciones tipo ChatGPT
+// Conversaciones tipo ChatGPT
 router.post('/conversations', createConversation);
 router.get('/conversations', listConversations);
 router.get('/conversations/:id/messages', getConversationMessages);
 
-// ✅ Opción 1: append mensajes (lo que te faltaba)
+// Opción 1: append mensajes
 router.post('/conversations/:id/messages', appendConversationMessage);
 
-// Chat principal (texto “clásico” si lo seguís usando)
+// ✅ rename/pin
+router.patch('/conversations/:id', updateConversation);
+
+// ✅ soft delete
+router.delete('/conversations/:id', deleteConversation);
+
+// Chat principal (texto “clásico”)
 router.post('/chat', chatWithDanController);
 
 // Memoria (lo tuyo)

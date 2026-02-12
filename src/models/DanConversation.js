@@ -14,6 +14,21 @@ const danConversationSchema = new mongoose.Schema(
       default: '',
       index: true,
     },
+    pinned: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    pinnedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
 
     lastResponseId: { type: String },
     historySummary: { type: String },
@@ -30,6 +45,7 @@ const danConversationSchema = new mongoose.Schema(
     },
     lastMessageAt: {
       type: Date,
+      default: null,
       index: true,
     },
     lastFlushedAt: {
@@ -43,8 +59,8 @@ const danConversationSchema = new mongoose.Schema(
 );
 
 // índices útiles
+danConversationSchema.index({ userId: 1, deletedAt: 1, lastMessageAt: -1 });
+danConversationSchema.index({ userId: 1, pinned: -1, pinnedAt: -1, lastMessageAt: -1 });
 danConversationSchema.index({ pendingMemoryFlush: 1, lastMessageAt: 1 });
-danConversationSchema.index({ userId: 1, createdAt: -1 });
-danConversationSchema.index({ userId: 1, lastMessageAt: -1 });
 
 export const DanConversation = mongoose.model('DanConversation', danConversationSchema);

@@ -6,7 +6,7 @@ function safeObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
 }
 
-// POST /api/dan/conversations  -> crea un chat nuevo
+// POST /api/dan/conversations -> crea un chat nuevo (vacío)
 export async function createConversation(req, res, next) {
   try {
     const userId = req.user?.userId;
@@ -17,9 +17,12 @@ export async function createConversation(req, res, next) {
       userId,
       type,
       chequeoId: chequeoId || undefined,
-      lastMessageAt: null,
+      lastMessageAt: null, // ✅ clave: no cuenta como “visible” hasta que haya mensajes
       pendingMemoryFlush: false,
       title: '',
+      pinned: false,
+      pinnedAt: null,
+      deletedAt: null,
     });
 
     return res.status(201).json({ conversationId: convo._id, type: convo.type });
@@ -48,8 +51,8 @@ export async function appendConversationMessage(req, res, next) {
       return res.status(400).json({ message: 'text es obligatorio.' });
     }
 
-    // validar ownership
-    const convo = await DanConversation.findOne({ _id: convoId, userId });
+    // validar ownership + no borrada
+    const convo = await DanConversation.findOne({ _id: convoId, userId, deletedAt: null });
     if (!convo) return res.status(404).json({ message: 'Conversación no encontrada.' });
 
     const msg = await DanMessage.create({
@@ -73,6 +76,74 @@ export async function appendConversationMessage(req, res, next) {
   }
 }
 
+// ✅ PATCH /api/dan/conversations/:id -> rename / pin / unpin
+export async function updateConversation(req, res, next) {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ message: 'No autorizado.' });
+
+    const convoId = safeObjectId(req.params.id);
+    if (!convoId) return res.status(400).json({ message: 'conversationId inválido.' });
+
+    const { title, pinned } = req.body || {};
+
+    const convo = await DanConversation.findOne({ _id: convoId, userId, deletedAt: null });
+    if (!convo) return res.status(404).json({ message: 'Conversación no encontrada.' });
+
+    const $set = {};
+
+    if (typeof title === 'string') {
+      $set.title = title.trim().slice(0, 80); // límite simple
+    }
+
+    if (typeof pinned === 'boolean') {
+      $set.pinned = pinned;
+      $set.pinnedAt = pinned ? new Date() : null;
+    }
+
+    const updated = await DanConversation.findByIdAndUpdate(
+      convoId,
+      { $set },
+      { new: true }
+    ).lean();
+
+    return res.json({
+      ok: true,
+      conversation: {
+        _id: updated._id,
+        title: updated.title || '',
+        pinned: !!updated.pinned,
+        pinnedAt: updated.pinnedAt || null,
+        lastMessageAt: updated.lastMessageAt || null,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+}
+
+// ✅ DELETE /api/dan/conversations/:id -> soft delete
+export async function deleteConversation(req, res, next) {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ message: 'No autorizado.' });
+
+    const convoId = safeObjectId(req.params.id);
+    if (!convoId) return res.status(400).json({ message: 'conversationId inválido.' });
+
+    const convo = await DanConversation.findOne({ _id: convoId, userId, deletedAt: null });
+    if (!convo) return res.status(404).json({ message: 'Conversación no encontrada.' });
+
+    await DanConversation.findByIdAndUpdate(convoId, {
+      $set: { deletedAt: new Date() },
+    });
+
+    return res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+}
+
 // GET /api/dan/conversations -> lista chats del usuario
 export async function listConversations(req, res, next) {
   try {
@@ -81,42 +152,26 @@ export async function listConversations(req, res, next) {
 
     const limit = Math.min(parseInt(req.query.limit || '30', 10), 100);
 
-    const convos = await DanConversation.find({ userId, lastMessageAt: { $ne: null } })
-      .sort({ lastMessageAt: -1, updatedAt: -1 })
+    // ✅ Solo conversaciones “no vacías” y no borradas
+    const convos = await DanConversation.find({
+      userId,
+      deletedAt: null,
+      lastMessageAt: { $ne: null },
+    })
+      .sort({ pinned: -1, pinnedAt: -1, lastMessageAt: -1, updatedAt: -1 })
       .limit(limit)
       .lean();
 
-    // (aunque el front no lo muestre, lo dejo por compat)
-    const ids = convos.map((c) => c._id);
-    const lastMsgs = await DanMessage.aggregate([
-      { $match: { conversationId: { $in: ids } } },
-      { $sort: { createdAt: -1 } },
-      {
-        $group: {
-          _id: '$conversationId',
-          lastText: { $first: '$text' },
-          lastRole: { $first: '$role' },
-          lastAt: { $first: '$createdAt' },
-        },
-      },
-    ]);
-
-    const map = new Map(lastMsgs.map((m) => [String(m._id), m]));
-    const payload = convos.map((c) => {
-      const last = map.get(String(c._id));
-      return {
-        _id: c._id,
-        title: c.title || '',
-        type: c.type,
-        updatedAt: c.updatedAt,
-        createdAt: c.createdAt,
-        lastMessageAt: c.lastMessageAt || null,
-        // el front NO usa preview, pero lo dejo
-        preview: last?.lastText ? String(last.lastText).slice(0, 80) : '',
-        previewRole: last?.lastRole || null,
-        lastAt: last?.lastAt || null,
-      };
-    });
+    const payload = convos.map((c) => ({
+      _id: c._id,
+      title: c.title || '',
+      pinned: !!c.pinned,
+      pinnedAt: c.pinnedAt || null,
+      type: c.type,
+      updatedAt: c.updatedAt,
+      createdAt: c.createdAt,
+      lastMessageAt: c.lastMessageAt || null,
+    }));
 
     return res.json({ conversations: payload });
   } catch (e) {
@@ -133,10 +188,11 @@ export async function getConversationMessages(req, res, next) {
     const convoId = safeObjectId(req.params.id);
     if (!convoId) return res.status(400).json({ message: 'conversationId inválido.' });
 
-    const convo = await DanConversation.findOne({ _id: convoId, userId }).lean();
+    const convo = await DanConversation.findOne({ _id: convoId, userId, deletedAt: null }).lean();
     if (!convo) return res.status(404).json({ message: 'Conversación no encontrada.' });
 
-    const limit = Math.min(parseInt(req.query.limit || '200', 10), 500);
+    // ✅ límite default 60 (lo que pediste)
+    const limit = Math.min(parseInt(req.query.limit || '60', 10), 500);
 
     const msgs = await DanMessage.find({ conversationId: convoId })
       .sort({ createdAt: 1 })
@@ -148,6 +204,7 @@ export async function getConversationMessages(req, res, next) {
         _id: convo._id,
         type: convo.type,
         title: convo.title || '',
+        pinned: !!convo.pinned,
         createdAt: convo.createdAt,
         updatedAt: convo.updatedAt,
         lastMessageAt: convo.lastMessageAt || null,
