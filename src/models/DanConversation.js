@@ -9,6 +9,13 @@ const danConversationSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Tipo de conversación (se usa en controllers)
+    type: {
+      type: String,
+      default: 'general',
+      index: true,
+    },
+
     title: {
       type: String,
       default: '',

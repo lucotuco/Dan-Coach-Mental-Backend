@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { DanConversation } from '../models/DanConversation.js';
 import { DanMessage } from '../models/DanMessage.js';
+import { generateConversationTitle } from '../services/danCoach.js';
 
 function safeObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
@@ -217,6 +218,73 @@ export async function getConversationMessages(req, res, next) {
       })),
       lastResponseId: convo.lastResponseId || null,
       historySummary: convo.historySummary || null,
+    });
+  } catch (e) {
+    next(e);
+  }
+}
+
+// ✅ POST /api/dan/conversations/:id/end -> marca fin + genera título si falta
+export async function endConversation(req, res, next) {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ message: 'No autorizado.' });
+
+    const convoId = safeObjectId(req.params.id);
+    if (!convoId) return res.status(400).json({ message: 'conversationId inválido.' });
+
+    // ownership + no borrada
+    const convo = await DanConversation.findOne({ _id: convoId, userId, deletedAt: null });
+    if (!convo) return res.status(404).json({ message: 'Conversación no encontrada.' });
+
+    // marcar fin (idempotente)
+    if (!convo.endedAt) {
+      convo.endedAt = new Date();
+    }
+
+    // Si ya tiene título manual o ya autogenerado, no tocar.
+    const alreadyHasTitle = typeof convo.title === 'string' && convo.title.trim().length > 0;
+    if (alreadyHasTitle) {
+      await convo.save();
+      return res.json({
+        ok: true,
+        conversation: {
+          _id: convo._id,
+          title: convo.title || '',
+          endedAt: convo.endedAt || null,
+          lastMessageAt: convo.lastMessageAt || null,
+        },
+      });
+    }
+
+    // Extraer últimos mensajes para armar un título
+    const msgs = await DanMessage.find({ conversationId: convoId })
+      .sort({ createdAt: -1 })
+      .limit(18)
+      .lean();
+
+    const excerpt = msgs
+      .reverse()
+      .map((m) => `${String(m.role || '').toUpperCase()}: ${String(m.text || '').trim()}`)
+      .join('\n');
+
+    const title = await generateConversationTitle({ excerpt, fallbackDate: new Date() });
+
+    convo.title = title;
+    convo.titleGeneratedAt = new Date();
+    convo.titleModel = process.env.DAN_TITLE_MODEL || process.env.DAN_MODEL || '';
+    convo.titlePromptVersion = 1;
+
+    await convo.save();
+
+    return res.json({
+      ok: true,
+      conversation: {
+        _id: convo._id,
+        title: convo.title || '',
+        endedAt: convo.endedAt || null,
+        lastMessageAt: convo.lastMessageAt || null,
+      },
     });
   } catch (e) {
     next(e);
