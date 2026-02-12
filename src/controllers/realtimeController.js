@@ -5,7 +5,8 @@ import { CoachSession } from '../models/CoachSession.js';
 import { Chequeo } from '../models/Chequeo.js';
 import { RealtimeSessionState } from '../models/RealtimeSessionState.js';
 import { SessionTranscript } from '../models/SessionTranscript.js';
-
+import { DanConversation } from '../models/DanConversation.js';
+import { DanMessage } from '../models/DanMessage.js';
 import { getCachedMemory, setCachedMemory } from '../services/memoryCache.js';
 import { upsertSessionTranscript } from '../services/sessionTranscriptStore.js';
 import {
@@ -39,6 +40,35 @@ function getAuthUserId(req) {
 function buildRealtimeInstructions(base, contextPack) {
   return base + (contextPack ? `\n\n=== CONTEXT_PACK (personalización + memoria) ===\n${contextPack}\n=== FIN CONTEXT_PACK ===\n` : '');
 }
+function safeObjectId(id) {
+  return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
+}
+
+async function buildConversationContext({ userId, conversationId, limit = 60 }) {
+  const convoId = safeObjectId(conversationId);
+  if (!convoId) return { summary: '', recentTurns: '' };
+
+  const convo = await DanConversation.findOne({ _id: convoId, userId }).lean();
+  if (!convo) return { summary: '', recentTurns: '' };
+
+  const msgs = await DanMessage.find({ conversationId: convoId })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .lean();
+
+  const ordered = msgs.reverse(); // cronológico
+
+  const recentTurns = ordered
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => `${m.role === 'user' ? 'Usuario' : 'DAN'}: ${String(m.text || '')}`)
+    .join('\n');
+
+  return {
+    summary: String(convo.historySummary || '').trim(),
+    recentTurns,
+  };
+}
+
 
 function oid(id) {
   return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : id;
@@ -131,6 +161,7 @@ export const getRealtimeClientSecret = async (req, res) => {
 
     const mode = (req.query.mode ?? 'text').toString().toLowerCase();
     const outputModality = mode === 'audio' ? 'audio' : 'text';
+const conversationId = (req.query.conversationId ?? '').toString().trim();
 
     let contextPack = '';
     if (userId) {
@@ -148,7 +179,38 @@ export const getRealtimeClientSecret = async (req, res) => {
       }
     }
 
-    const instructions = buildRealtimeInstructions(DAN_BASE_INSTRUCTIONS, contextPack);
+    let convoSummary = '';
+let convoRecentTurns = '';
+
+if (conversationId && userId) {
+  try {
+    const ctx = await buildConversationContext({
+      userId,
+      conversationId,
+      limit: parseInt(process.env.DAN_CONVO_RECENT_LIMIT || '60', 10),
+    });
+    convoSummary = ctx.summary;
+    convoRecentTurns = ctx.recentTurns;
+  } catch (e) {
+    console.error('Error armando contexto de conversación para realtime:', e);
+  }
+}
+
+const convoBlock = [
+  convoSummary
+    ? `=== RESUMEN_PERSISTIDO_CONVERSACION ===\n${convoSummary}\n=== FIN_RESUMEN ===`
+    : '',
+  convoRecentTurns
+    ? `=== ULTIMOS_MENSAJES_CONVERSACION ===\n${convoRecentTurns}\n=== FIN_ULTIMOS ===`
+    : '',
+]
+  .filter(Boolean)
+  .join('\n\n');
+
+const mergedContext = [convoBlock, contextPack].filter(Boolean).join('\n\n');
+
+const instructions = buildRealtimeInstructions(DAN_BASE_INSTRUCTIONS, mergedContext);
+
 
     const sessionPayload = {
       type: 'realtime',
