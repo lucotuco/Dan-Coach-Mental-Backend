@@ -6,6 +6,7 @@ import {
   listConversations,
   getConversationMessages,
   appendConversationMessage,
+  endConversation,
   updateConversation,     // ✅ nuevo
   deleteConversation,     // ✅ nuevo
 } from '../controllers/danConversationsController.js';
@@ -19,6 +20,9 @@ router.get('/conversations/:id/messages', getConversationMessages);
 
 // Opción 1: append mensajes
 router.post('/conversations/:id/messages', appendConversationMessage);
+
+// ✅ “Guardar / cerrar” conversación: genera título si falta
+router.post('/conversations/:id/end', endConversation);
 
 // ✅ rename/pin
 router.patch('/conversations/:id', updateConversation);

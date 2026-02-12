@@ -14,6 +14,22 @@ const danConversationSchema = new mongoose.Schema(
       default: '',
       index: true,
     },
+
+    // ✅ auto-title metadata
+    titleGeneratedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    titleModel: { type: String, default: '' },
+    titlePromptVersion: { type: Number, default: 1 },
+
+    // ✅ opcional: marca de fin (cuando el front “guarda/cierra”)
+    endedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
     pinned: {
       type: Boolean,
       default: false,

@@ -161,3 +161,92 @@ export async function chatWithDan({
     model,
   };
 }
+
+
+// ------------------------------
+// Auto-title (Chat sessions)
+// ------------------------------
+
+function formatTodayTitle(date = new Date()) {
+  // America/Argentina/Buenos_Aires
+  const fmt = new Intl.DateTimeFormat('es-AR', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+
+  // Ej: "12 feb 2026" o "12 feb. 2026" según runtime -> normalizamos
+  return fmt
+    .format(date)
+    .replace(/\./g, '')          // quita puntos en abreviaturas (feb.)
+    .replace(/\s+/g, ' ')        // normaliza espacios
+    .trim()
+    .toLowerCase();               // preferencia: compacto
+}
+
+function sanitizeTitle(raw) {
+  const s = String(raw || '')
+    .trim()
+    .replace(/^["'“”‘’]+|["'“”‘’]+$/g, '')  // sin comillas
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // sin punto final
+  return s.replace(/[\.!?]+$/g, '').trim().slice(0, 80);
+}
+
+export async function generateConversationTitle({ excerpt, fallbackDate = new Date() }) {
+  const fallback = formatTodayTitle(fallbackDate);
+
+  if (!openai.apiKey) return fallback;
+
+  const cleanExcerpt = String(excerpt || '').trim();
+  if (!cleanExcerpt) return fallback;
+
+  const model = process.env.DAN_TITLE_MODEL || process.env.DAN_MODEL || 'gpt-4.1-mini';
+  const promptVersion = 1;
+
+  const system = 'Generás títulos cortos y seguros para conversaciones en español.';
+  const user = [
+    'Generá un título en español, de 3 a 7 palabras, sin comillas, sin punto final.',
+    '- Debe describir el tema principal',
+    '- No incluir datos sensibles (emails, teléfonos, direcciones)',
+    '- Si hay dos temas, elegí el más reciente',
+    'Devolvé SOLO el título.',
+    '',
+    'CONVERSACIÓN (extracto):',
+    cleanExcerpt,
+  ].join('\n');
+
+  const input = [
+    { role: 'system', content: system },
+    { role: 'user', content: user },
+  ];
+
+  if (shouldLogDanPayload) {
+    console.log('[DAN_TITLE] Payload enviado a OpenAI /responses.create:');
+    console.log(JSON.stringify({ model, promptVersion, input_preview_chars: cleanExcerpt.length }, null, 2));
+    // Si querés ver TODO el prompt, descomentá:
+    // console.log(JSON.stringify({ model, promptVersion, input }, null, 2));
+  }
+
+  try {
+    const response = await openai.responses.create({ model, input });
+    const raw = response.output_text || '';
+    const title = sanitizeTitle(raw);
+
+    // Validación mínima: 3-7 palabras (best-effort)
+    const wc = title ? title.split(/\s+/).filter(Boolean).length : 0;
+    if (wc < 3 || wc > 10) {
+      // si se fue de rango, igual preferimos algo usable antes que fallback
+      return title || fallback;
+    }
+
+    return title || fallback;
+  } catch (e) {
+    if (shouldLogDanPayload) console.log('[DAN_TITLE] Error generando título:', e?.message || e);
+    return fallback;
+  }
+}
