@@ -6,9 +6,9 @@ import {
   listConversations,
   getConversationMessages,
   appendConversationMessage,
-  endConversation,
-  updateConversation,     // ✅ nuevo
-  deleteConversation,     // ✅ nuevo
+  endConversation,       // ✅ auto-title al finalizar
+  updateConversation,     // ✅ rename/pin
+  deleteConversation,     // ✅ soft delete
 } from '../controllers/danConversationsController.js';
 
 const router = Router();
@@ -18,16 +18,16 @@ router.post('/conversations', createConversation);
 router.get('/conversations', listConversations);
 router.get('/conversations/:id/messages', getConversationMessages);
 
-// Opción 1: append mensajes
+// append mensajes
 router.post('/conversations/:id/messages', appendConversationMessage);
 
-// ✅ “Guardar / cerrar” conversación: genera título si falta
+// ✅ finalizar conversación y generar título
 router.post('/conversations/:id/end', endConversation);
 
-// ✅ rename/pin
+// rename/pin
 router.patch('/conversations/:id', updateConversation);
 
-// ✅ soft delete
+// soft delete
 router.delete('/conversations/:id', deleteConversation);
 
 // Chat principal (texto “clásico”)

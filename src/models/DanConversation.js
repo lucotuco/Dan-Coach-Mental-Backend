@@ -9,34 +9,25 @@ const danConversationSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Tipo de conversación (se usa en controllers)
-    type: {
-      type: String,
-      default: 'general',
-      index: true,
-    },
-
     title: {
       type: String,
       default: '',
       index: true,
     },
 
-    // ✅ auto-title metadata
-    titleGeneratedAt: {
-      type: Date,
-      default: null,
-      index: true,
-    },
-    titleModel: { type: String, default: '' },
-    titlePromptVersion: { type: Number, default: 1 },
 
-    // ✅ opcional: marca de fin (cuando el front “guarda/cierra”)
-    endedAt: {
-      type: Date,
-      default: null,
-      index: true,
-    },
+endedAt: {
+  type: Date,
+  default: null,
+  index: true,
+},
+titleGeneratedAt: {
+  type: Date,
+  default: null,
+  index: true,
+},
+titleModel: { type: String },
+titlePromptVersion: { type: Number },
     pinned: {
       type: Boolean,
       default: false,
