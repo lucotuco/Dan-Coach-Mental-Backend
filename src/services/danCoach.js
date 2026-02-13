@@ -211,7 +211,7 @@ export async function generateConversationTitle({ excerpt }) {
 
   const system = 'Sos un asistente que genera títulos cortos para conversaciones.';
   const user = [
-    'Generá un título en español, de 3 a 7 palabras, sin comillas, sin punto final.',
+    'Generá un título en español, de hasta 5 palabras, sin comillas, sin punto final.',
     '- Debe describir el tema principal',
     "- No usar nombres propios salvo que sea clave (ej: 'Disney', 'n8n')",
     '- No incluir datos sensibles (emails, teléfonos, direcciones)',
