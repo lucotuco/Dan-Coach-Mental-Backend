@@ -8,9 +8,11 @@ export async function connectToDatabase(uri) {
   try {
     mongoose.set('strictQuery', false);
     await mongoose.connect(uri, {
+      dbName: 'dan2',
       serverSelectionTimeoutMS: 5000
     });
-    console.log('✅ MongoDB connection established');
+   
+    console.log('✅DB:', mongoose.connection.name);
   } catch (error) {
     console.error('❌ Error connecting to MongoDB', error.message);
     throw error;
