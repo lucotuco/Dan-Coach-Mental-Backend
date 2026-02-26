@@ -8,6 +8,7 @@ import danRoutes from './routes/danRoutes.js';
 import realtimeRoutes from './routes/realtimeRoutes.js';
 import didRoutes from './routes/didRoutes.js';
 import ttsRoutes from './routes/ttsRoutes.js';
+import authRoutes from './routes/authRoutes.js'
 
 import { connectToDatabase } from './config/mongo.js';
 import { authMiddleware } from './middleware/authMiddleware.js';
@@ -83,7 +84,7 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
-app.use('/api/auth', require('./routes/authRoutes'));
+app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/chequeos', chequeoRoutes);
 app.use('/api/dan', danRoutes);
