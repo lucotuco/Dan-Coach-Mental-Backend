@@ -1,6 +1,6 @@
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+import bcrypt from'bcryptjs';
+import jwt from'jsonwebtoken';
+import User from'../models/User';
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 
