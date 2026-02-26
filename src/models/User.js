@@ -5,6 +5,7 @@ const userSchema = new mongoose.Schema(
     name: {
       type: String,
       required: true,
+      trim: true
     },
     email: {
       type: String,
@@ -14,34 +15,23 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: true,
+      lowercase: true, 
+      trim: true
     },
     birthDate: {
       type: Date,
       required: false,
     },
-    sport: {
-      type: String,
-      required: false,
+    rol:{
+    type:String,
+      enum: ['coach' | 'member'],
     },
-    competitionType: {
-      type: String,
-      enum: ['individual', 'pareja', 'equipo'],
-      required: false,
+    teamId:{
+      type:[ mongoose.Schema.Types.ObjectId | null],
+      ref: 'Team', default: null  
     },
-    level: {
-      type: String,
-      required: false,
-    },
-    goalA: {
-      url: { type: String },
-      transcript: { type: String },
-      summary: { type: String },
-      tags: [{ type: String }],
-      durationSeconds: { type: Number },
-    },
-    goalT:{
-      type: String,
-      required: false,
+    coachOfTeamId:{
+      type:[ mongoose.Schema.Types.ObjectId | null]
     }
   },
   { timestamps: true }

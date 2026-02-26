@@ -2,7 +2,8 @@
 import jwt from 'jsonwebtoken';
 
 const PUBLIC_ROUTES = [
-  { method: 'POST', path: '/api/users/login' },
+  { method: 'POST', path: '/api/auth/register' },
+  { method: 'POST', path: '/api/auth/login' },
   { method: 'POST', path: '/api/users' },
 
   { method: 'GET', prefix: '/api/tts/' },
@@ -38,7 +39,11 @@ export function authMiddleware(req, res, next) {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     console.log('[AUTH] decoded JWT payload:', decoded);
-    req.user = decoded;
+    req.user = {
+    userId: decoded.userId,
+    role: decoded.role,     
+    teamId: decoded.teamId, 
+};
     return next();
   } catch {
     return res.status(401).json({ message: 'Token inválido o expirado' });

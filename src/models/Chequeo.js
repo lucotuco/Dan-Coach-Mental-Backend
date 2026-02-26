@@ -11,38 +11,24 @@ const chequeoSchema = new mongoose.Schema(
       type: Date,
       required: true,
     },
-    tipo: {
-      type: String,
+    teamId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref:'Team',
       required: true,
     },
-    variable1: {
-      type: Number,
-      required: false,
+    notes:{
+      type:String
     },
-    variable2: {
-      type: Number,
-      required: false,
-    },
-    variable3: {
-      type: Number,
-      required: false,
-    },
-    variable4: {
-      type: Number,
-      required: false,
-    },
-    variable5: {
-      type: Number,
-      required: false,
-    },
-    variable6: {
-      type: Number,
-      required: false,
-    },
-    variable7: {
-      type: Number,
-      required: false,
-    },
+    scores: {
+    confianza: Number,
+    disciplina: Number,
+    persistencia: Number,
+    concentracion: Number,
+    vinculacion: Number,
+    regulacionEmocional: Number,
+    superacion: Number,
+    liderazgo: Number,
+},
     audio: {
       url: { type: String },
       transcript: { type: String },
