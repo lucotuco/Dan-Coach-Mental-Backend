@@ -9,6 +9,7 @@ import realtimeRoutes from './routes/realtimeRoutes.js';
 import didRoutes from './routes/didRoutes.js';
 import ttsRoutes from './routes/ttsRoutes.js';
 import authRoutes from './routes/authRoutes.js'
+import teamRoutes from './routes/teamRoutes.js'
 
 import { connectToDatabase } from './config/mongo.js';
 import { authMiddleware } from './middleware/authMiddleware.js';
@@ -84,6 +85,7 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+app.use('/api/teams', teamRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/chequeos', chequeoRoutes);

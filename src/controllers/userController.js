@@ -11,6 +11,7 @@ export async function getMe(req, res, next) {
       email: user.email,
       role: user.role,
       teamId: user.teamId ? String(user.teamId) : null,
+      birthDate: user.birthDate,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     });
