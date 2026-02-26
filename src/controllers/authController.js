@@ -24,56 +24,65 @@ const publicUser = (user) => ({
   teamId: user.teamId ? String(user.teamId) : null,
 });
 
-exports.register = async (req, res) => {
-  const name = String(req.body.name || '').trim();
-  const email = normalizeEmail(req.body.email);
-  const password = String(req.body.password || '');
+export async function register(req, res) {
+  try {
+    const name = String(req.body.name || '').trim();
+    const email = normalizeEmail(req.body.email);
+    const password = String(req.body.password || '');
 
-  // role libre pero validado
-  const role = req.body.role === 'coach' ? 'coach' : 'member';
+    // role libre pero validado
+    const role = req.body.role === 'coach' ? 'coach' : 'member';
 
-  if (!email) return res.status(400).json({ error: 'Email required' });
-  if (!password || password.length < 6) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (!email) return res.status(400).json({ error: 'Email required' });
+    if (!password || password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+
+    const existing = await User.findOne({ email });
+    if (existing) return res.status(409).json({ error: 'Email already in use' });
+
+    const hashed = await bcrypt.hash(password, 10);
+
+    const user = await User.create({
+      name,
+      email,
+      password: hashed,
+      role,
+      teamId: null,
+    });
+
+    const token = signToken(user);
+
+    return res.status(201).json({
+      token,
+      user: publicUser(user),
+    });
+  } catch (error) {
+    next(error);
   }
-
-  const existing = await User.findOne({ email });
-  if (existing) return res.status(409).json({ error: 'Email already in use' });
-
-  const hashed = await bcrypt.hash(password, 10);
-
-  const user = await User.create({
-    name,
-    email,
-    password: hashed,
-    role,
-    teamId: null,
-  });
-
-  const token = signToken(user);
-
-  return res.status(201).json({
-    token,
-    user: publicUser(user),
-  });
 };
 
-exports.login = async (req, res) => {
-  const email = normalizeEmail(req.body.email);
-  const password = String(req.body.password || '');
+export async function login(req, res) {
+  try {
 
-  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+    const email = normalizeEmail(req.body.email);
+    const password = String(req.body.password || '');
 
-  const user = await User.findOne({ email });
-  if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
-  const ok = await bcrypt.compare(password, user.password);
-  if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+    const user = await User.findOne({ email });
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
-  const token = signToken(user);
+    const ok = await bcrypt.compare(password, user.password);
+    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
-  return res.json({
-    token,
-    user: publicUser(user),
-  });
+    const token = signToken(user);
+
+    return res.json({
+      token,
+      user: publicUser(user),
+    });
+  } catch (error) {
+    next(error);
+  }
 };
