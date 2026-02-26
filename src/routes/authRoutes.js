@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-const authController = require('../controllers/authController');
+import authController from '../controllers/authController';
 
 const router = Router();
 
