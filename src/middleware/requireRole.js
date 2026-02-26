@@ -1,5 +1,5 @@
 // src/middleware/requireRole.js
-module.exports = function requireRole(allowed) {
+export default function requireRole(allowed) {
   const allowedRoles = Array.isArray(allowed) ? allowed : [allowed];
 
   return (req, res, next) => {
@@ -11,4 +11,4 @@ module.exports = function requireRole(allowed) {
     }
     next();
   };
-};
+}
