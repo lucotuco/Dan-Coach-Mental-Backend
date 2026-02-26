@@ -11,7 +11,25 @@ export async function listUsers(req, res, next) {
     next(error);
   }
 }
+import { User } from '../models/User.js';
 
+export async function getMe(req, res, next) {
+  try {
+    // req.user viene del authMiddleware
+    const user = await User.findById(req.user.userId).select('-password');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    return res.json({
+      userId: String(user._id),
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      teamId: user.teamId ? String(user.teamId) : null,
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
 export async function loginUser(req, res, next) {
   try {
     const { email, password } = req.body;
