@@ -1,6 +1,6 @@
-import bcrypt from'bcryptjs';
-import jwt from'jsonwebtoken';
-import {User} from'../models/User.js';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { User } from '../models/User.js';
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 
@@ -24,15 +24,15 @@ const publicUser = (user) => ({
   teamId: user.teamId ? String(user.teamId) : null,
 });
 
-export async function register(req, res) {
+export async function register(req, res, next) {
   try {
     const name = String(req.body.name || '').trim();
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || '');
 
-    // role libre pero validado
     const role = req.body.role === 'coach' ? 'coach' : 'member';
 
+    if (!name) return res.status(400).json({ error: 'Name required' });
     if (!email) return res.status(400).json({ error: 'Email required' });
     if (!password || password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
@@ -53,22 +53,20 @@ export async function register(req, res) {
 
     const token = signToken(user);
 
-    return res.status(201).json({
-      token,
-      user: publicUser(user),
-    });
+    return res.status(201).json({ token, user: publicUser(user) });
   } catch (error) {
-    next(error);
+    return next(error);
   }
-};
+}
 
-export async function login(req, res) {
+export async function login(req, res, next) {
   try {
-
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || '');
 
-    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password required' });
+    }
 
     const user = await User.findOne({ email });
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
@@ -77,12 +75,8 @@ export async function login(req, res) {
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
     const token = signToken(user);
-
-    return res.json({
-      token,
-      user: publicUser(user),
-    });
+    return res.json({ token, user: publicUser(user) });
   } catch (error) {
-    next(error);
+    return next(error);
   }
-};
+}
