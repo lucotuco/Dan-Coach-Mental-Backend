@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 
 const PUBLIC_ROUTES = [
   { method: 'POST', path: '/api/auth/register' },
-  { method: 'GET', path: '/api/auth/login' },
+  { method: 'POST', path: '/api/auth/login' },
   { method: 'POST', path: '/api/users' },
 
   { method: 'GET', prefix: '/api/tts/' },
