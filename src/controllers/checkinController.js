@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { Checkin, CHECKIN_AXES } from '../models/Checkin.js';
+import { Checkin, CHECKIN_AXES } from '../models/Chequeo.js';
 import { User } from '../models/User.js';
 import { getWeekStart } from '../utils/weekStart.js';
 
