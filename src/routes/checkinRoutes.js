@@ -8,7 +8,7 @@ import {
   listMyCheckins,
   getMyCurrentCheckin,
   teamWeek,
-} from '../controllers/checkinsController.js';
+} from '../controllers/checkinController.js';
 
 const router = Router();
 
