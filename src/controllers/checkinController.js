@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { Checkin, CHECKIN_AXES } from '../models/Chequeo.js';
 import { User } from '../models/User.js';
-import { getWeekStart } from '../utils/weekStart.js';
+import { getWeekStart } from '../services/weekStart.js';
 
 function isAnswerArrayValid(arr, minQuestionsPerAxis = 3) {
   if (!Array.isArray(arr)) return false;
