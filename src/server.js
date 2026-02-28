@@ -89,10 +89,10 @@ app.use('/api/teams', teamRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/checkins', checkinRoutes);
-app.use('/api/dan', danRoutes);
-app.use('/api/realtime', realtimeRoutes);
-app.use('/api/did', didRoutes);
-app.use('/api/tts', ttsRoutes);
+//app.use('/api/dan', danRoutes);
+//app.use('/api/realtime', realtimeRoutes);
+//app.use('/api/did', didRoutes);
+//app.use('/api/tts', ttsRoutes);
 
 app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
   console.error(err);
