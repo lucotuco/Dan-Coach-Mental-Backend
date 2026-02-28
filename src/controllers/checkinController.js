@@ -103,40 +103,46 @@ export async function getMyCurrentCheckin(req, res, next) {
   }
 }
 
-// 3) Dashboard coach por semana
 export async function teamWeek(req, res, next) {
   try {
-    const weekStart = new Date(req.query.weekStart);
-    if (Number.isNaN(weekStart.getTime())) {
-      return res.status(400).json({ error: 'weekStart invalid. Use YYYY-MM-DD' });
+    const dateStr = req.query.date;        // <-- nuevo
+    const weekStartStr = req.query.weekStart; // <-- legacy (opcional)
+
+    let baseDate;
+    if (dateStr) {
+      baseDate = new Date(dateStr);
+    } else if (weekStartStr) {
+      baseDate = new Date(weekStartStr);
+    } else {
+      baseDate = new Date();
     }
 
+    if (Number.isNaN(baseDate.getTime())) {
+      return res.status(400).json({ error: 'Invalid date. Use YYYY-MM-DD' });
+    }
+
+    const weekStart = getWeekStart(baseDate);
     const teamId = new mongoose.Types.ObjectId(req.user.teamId);
 
-    // Checkins de esa semana (sin answers para que no pese)
     const items = await Checkin.find({ teamId, weekStart }, { answers: 0 })
       .populate('userId', 'name email role')
       .sort({ createdAt: -1 });
 
-    // Promedios por eje (usa scores)
-    const groupStage = CHECKIN_AXES.reduce(
-      (acc, axis) => {
-        acc[axis] = { $avg: `$scores.${axis}` };
-        return acc;
-      },
-      { _id: null }
-    );
+    const groupStage = CHECKIN_AXES.reduce((acc, axis) => {
+      acc[axis] = { $avg: `$scores.${axis}` };
+      return acc;
+    }, { _id: null });
 
     const agg = await Checkin.aggregate([
       { $match: { teamId, weekStart } },
       { $group: groupStage },
     ]);
 
-    // % completitud (cuántos miembros del team completaron)
     const totalMembers = await User.countDocuments({ teamId });
     const completed = items.length;
 
     return res.json({
+      weekStart,
       items,
       teamAverages: agg[0] || null,
       completion: {
