@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import morgan from 'morgan';
 
 import userRoutes from './routes/userRoutes.js';
-import chequeoRoutes from './routes/chequeosRoutes.js';
+import checkinRoutes from './routes/checkinRoutes.js';
 import danRoutes from './routes/danRoutes.js';
 import realtimeRoutes from './routes/realtimeRoutes.js';
 import didRoutes from './routes/didRoutes.js';
@@ -88,7 +88,7 @@ app.get('/health', (req, res) => {
 app.use('/api/teams', teamRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
-app.use('/api/chequeos', chequeoRoutes);
+app.use('/api/checkins', checkinRoutes);
 app.use('/api/dan', danRoutes);
 app.use('/api/realtime', realtimeRoutes);
 app.use('/api/did', didRoutes);
