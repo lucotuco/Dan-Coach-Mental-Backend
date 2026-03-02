@@ -1,8 +1,8 @@
 import mongoose from 'mongoose';
 import { WeeklyPlan, PLAN_AXES } from '../models/Plan.js';
-import { Checkin } from '../models/Checkin.js';
+import { Checkin } from '../models/Chequeo.js';
 import { User } from '../models/User.js';
-import { getWeekStart } from '../utils/weekStart.js';
+import { getWeekStart } from '../services/weekStart.js';
 
 // ---- Helpers ----
 function pickLowestAxes(scores, n = 2) {
