@@ -1,8 +1,9 @@
+// src/controllers/plansController.js
 import mongoose from 'mongoose';
 import { WeeklyPlan, PLAN_AXES } from '../models/Plan.js';
 import { Checkin } from '../models/Chequeo.js';
-import { User } from '../models/User.js';
 import { getWeekStart } from '../services/weekStart.js';
+import { generateWeeklyPlanJSON } from '../services/planAI.js';
 
 // ---- Helpers ----
 function pickLowestAxes(scores, n = 2) {
@@ -86,13 +87,23 @@ function fallbackPlanFromScores(scores) {
   return { focusAxes, items: padded };
 }
 
-// ---- IA hook (implementación tuya) ----
-// Esta función la conectás a tu stack (OpenAI, etc.). Debe devolver:
-// { focusAxes: [...], items: [{id,axis,title,description}] }
-async function generatePlanWithAI({ currentCheckin, lastCheckins, lastPlans }) {
-  // ⚠️ Implementación real: acá llamás a tu IA.
-  // Para que no te frene, devolvemos null y usamos fallback si no lo conectaste.
-  return null;
+// ---- IA hook (OpenAI base model via Responses API) ----
+// Devuelve { focusAxes: [...], items: [{id,axis,title,description}] } o null si falla
+async function generatePlanWithAI({ snapshot }) {
+  try {
+    const { json, model, responseId } = await generateWeeklyPlanJSON({
+      snapshot,
+      axes: PLAN_AXES,
+    });
+
+    // Adjuntamos meta para guardarla luego (y la removemos antes de validar/guardar items)
+    if (json && typeof json === 'object') {
+      json.__aiMeta = { model, responseId };
+    }
+    return json;
+  } catch (e) {
+    return null;
+  }
 }
 
 // ---- Controllers ----
@@ -158,11 +169,14 @@ export async function generateMyWeeklyPlan(req, res, next) {
     };
 
     // 5) IA
-    let aiPlan = await generatePlanWithAI({
-      currentCheckin: snapshot.current,
-      lastCheckins: snapshot.history,
-      lastPlans: snapshot.plans,
-    });
+    let aiPlan = await generatePlanWithAI({ snapshot });
+
+    // extraer aiMeta si vino
+    let aiMeta = { promptVersion: 'v1' };
+    if (aiPlan?.__aiMeta) {
+      aiMeta = { ...aiPlan.__aiMeta, promptVersion: 'v1' };
+      delete aiPlan.__aiMeta;
+    }
 
     // 6) validar o fallback
     if (aiPlan) {
@@ -171,6 +185,7 @@ export async function generateMyWeeklyPlan(req, res, next) {
     }
     if (!aiPlan) {
       aiPlan = fallbackPlanFromScores(currentCheckin.scores);
+      aiMeta = { ...aiMeta, fallback: true };
     }
 
     // 7) persistir (idempotencia con unique index)
@@ -190,7 +205,7 @@ export async function generateMyWeeklyPlan(req, res, next) {
       })),
       status: 'active',
       inputsSnapshot: snapshot,
-      aiMeta: { promptVersion: 'v1' },
+      aiMeta,
     };
 
     let created;
