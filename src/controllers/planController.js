@@ -105,7 +105,107 @@ async function generatePlanWithAI({ snapshot }) {
     return null;
   }
 }
+export async function ensureWeeklyPlanForUser({ user, baseDate }) {
+  const weekStart = getWeekStart(baseDate);
 
+  const existing = await WeeklyPlan.findOne({
+    teamId: user.teamId,
+    userId: user.userId,
+    weekStart,
+  });
+  if (existing) return { plan: existing, reused: true };
+
+  const currentCheckin = await Checkin.findOne({
+    teamId: user.teamId,
+    userId: user.userId,
+    weekStart,
+  });
+  if (!currentCheckin) {
+    const err = new Error('Checkin required for this week');
+    err.status = 400;
+    throw err;
+  }
+
+  const lastCheckins = await Checkin.find({
+    teamId: user.teamId,
+    userId: user.userId,
+    weekStart: { $lt: weekStart },
+  })
+    .sort({ weekStart: -1 })
+    .limit(8)
+    .select('weekStart scores');
+
+  const lastPlans = await WeeklyPlan.find({
+    teamId: user.teamId,
+    userId: user.userId,
+    weekStart: { $lt: weekStart },
+  })
+    .sort({ weekStart: -1 })
+    .limit(4)
+    .select('weekStart focusAxes items status');
+
+  const snapshot = {
+    current: { weekStart, scores: currentCheckin.scores, notes: currentCheckin.notes || '' },
+    history: lastCheckins.map((c) => ({ weekStart: c.weekStart, scores: c.scores })),
+    plans: lastPlans.map((p) => ({
+      weekStart: p.weekStart,
+      focusAxes: p.focusAxes,
+      status: p.status,
+      completionPct: p.items?.length
+        ? Number(((p.items.filter((i) => i.done).length / p.items.length) * 100).toFixed(1))
+        : 0,
+      topDone: (p.items || []).filter((i) => i.done).slice(0, 3).map((i) => i.title),
+      topMissed: (p.items || []).filter((i) => !i.done).slice(0, 3).map((i) => i.title),
+    })),
+  };
+
+  let aiPlan = await generatePlanWithAI({ snapshot });
+
+  let aiMeta = { promptVersion: 'v1' };
+  if (aiPlan?.__aiMeta) {
+    aiMeta = { ...aiPlan.__aiMeta, promptVersion: 'v1' };
+    delete aiPlan.__aiMeta;
+  }
+
+  if (aiPlan) {
+    const err = validateAiPlanShape(aiPlan);
+    if (err) aiPlan = null;
+  }
+  if (!aiPlan) {
+    aiPlan = fallbackPlanFromScores(currentCheckin.scores);
+    aiMeta = { ...aiMeta, fallback: true };
+  }
+
+  const planDoc = {
+    teamId: user.teamId,
+    userId: user.userId,
+    weekStart,
+    generatedFromCheckinId: currentCheckin._id,
+    focusAxes: aiPlan.focusAxes,
+    items: aiPlan.items.map((it) => ({
+      id: String(it.id).trim(),
+      axis: it.axis,
+      title: String(it.title).trim(),
+      description: String(it.description).trim(),
+      done: false,
+      dayHint: it.dayHint ?? null,
+    })),
+    status: 'active',
+    inputsSnapshot: snapshot,
+    aiMeta,
+  };
+
+  try {
+    const created = await WeeklyPlan.create(planDoc);
+    return { plan: created, reused: false };
+  } catch (e) {
+    if (String(e.code) === '11000') {
+      const again = await WeeklyPlan.findOne({ teamId: user.teamId, userId: user.userId, weekStart });
+      return { plan: again, reused: true };
+    }
+    throw e;
+  }
+}
 // ---- Controllers ----
 
 export async function generateMyWeeklyPlan(req, res, next) {
@@ -113,114 +213,8 @@ export async function generateMyWeeklyPlan(req, res, next) {
     const baseDate = req.query.date ? new Date(req.query.date) : new Date();
     if (Number.isNaN(baseDate.getTime())) return res.status(400).json({ error: 'Invalid date. Use YYYY-MM-DD' });
 
-    const weekStart = getWeekStart(baseDate);
-
-    // 1) ya existe? => devolver
-    const existing = await WeeklyPlan.findOne({
-      teamId: req.user.teamId,
-      userId: req.user.userId,
-      weekStart,
-    });
-
-    if (existing) return res.json({ plan: existing, reused: true });
-
-    // 2) necesita checkin de esa semana
-    const currentCheckin = await Checkin.findOne({
-      teamId: req.user.teamId,
-      userId: req.user.userId,
-      weekStart,
-    });
-
-    if (!currentCheckin) return res.status(400).json({ error: 'Checkin required for this week' });
-
-    // 3) traer historial compacto
-    const lastCheckins = await Checkin.find({
-      teamId: req.user.teamId,
-      userId: req.user.userId,
-      weekStart: { $lt: weekStart },
-    })
-      .sort({ weekStart: -1 })
-      .limit(8)
-      .select('weekStart scores');
-
-    const lastPlans = await WeeklyPlan.find({
-      teamId: req.user.teamId,
-      userId: req.user.userId,
-      weekStart: { $lt: weekStart },
-    })
-      .sort({ weekStart: -1 })
-      .limit(4)
-      .select('weekStart focusAxes items status');
-
-    // 4) armar snapshot para IA
-    const snapshot = {
-      current: { weekStart, scores: currentCheckin.scores, notes: currentCheckin.notes || '' },
-      history: lastCheckins.map((c) => ({ weekStart: c.weekStart, scores: c.scores })),
-      plans: lastPlans.map((p) => ({
-        weekStart: p.weekStart,
-        focusAxes: p.focusAxes,
-        status: p.status,
-        completionPct: p.items?.length
-          ? Number(((p.items.filter((i) => i.done).length / p.items.length) * 100).toFixed(1))
-          : 0,
-        topDone: (p.items || []).filter((i) => i.done).slice(0, 3).map((i) => i.title),
-        topMissed: (p.items || []).filter((i) => !i.done).slice(0, 3).map((i) => i.title),
-      })),
-    };
-
-    // 5) IA
-    let aiPlan = await generatePlanWithAI({ snapshot });
-
-    // extraer aiMeta si vino
-    let aiMeta = { promptVersion: 'v1' };
-    if (aiPlan?.__aiMeta) {
-      aiMeta = { ...aiPlan.__aiMeta, promptVersion: 'v1' };
-      delete aiPlan.__aiMeta;
-    }
-
-    // 6) validar o fallback
-    if (aiPlan) {
-      const err = validateAiPlanShape(aiPlan);
-      if (err) aiPlan = null;
-    }
-    if (!aiPlan) {
-      aiPlan = fallbackPlanFromScores(currentCheckin.scores);
-      aiMeta = { ...aiMeta, fallback: true };
-    }
-
-    // 7) persistir (idempotencia con unique index)
-    const planDoc = {
-      teamId: req.user.teamId,
-      userId: req.user.userId,
-      weekStart,
-      generatedFromCheckinId: currentCheckin._id,
-      focusAxes: aiPlan.focusAxes,
-      items: aiPlan.items.map((it) => ({
-        id: String(it.id).trim(),
-        axis: it.axis,
-        title: String(it.title).trim(),
-        description: String(it.description).trim(),
-        done: false,
-        dayHint: it.dayHint ?? null,
-      })),
-      status: 'active',
-      inputsSnapshot: snapshot,
-      aiMeta,
-    };
-
-    let created;
-    try {
-      created = await WeeklyPlan.create(planDoc);
-    } catch (e) {
-      if (String(e.code) === '11000') {
-        // otro request lo creó en paralelo
-        const again = await WeeklyPlan.findOne({ teamId: req.user.teamId, userId: req.user.userId, weekStart });
-        return res.json({ plan: again, reused: true });
-      }
-      throw e;
-    }
-
-    return res.status(201).json({ plan: created, reused: false });
+    const result = await ensureWeeklyPlanForUser({ user: req.user, baseDate });
+    return res.status(result.reused ? 200 : 201).json(result);
   } catch (err) {
     return next(err);
   }

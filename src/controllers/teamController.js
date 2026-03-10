@@ -214,7 +214,7 @@ export async function joinByCode(req, res, next) {
     if (!joinCode) return res.status(400).json({ error: 'joinCode required' });
 
     const user = await User.findById(req.user.userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user) return res.status(405).json({ error: 'User not found' });
     if (user.teamId) return res.status(409).json({ error: 'User already in a team' });
 
     const team = await Team.findOne({ joinCode });

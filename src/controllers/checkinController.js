@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { Checkin, CHECKIN_AXES } from '../models/Chequeo.js';
 import { User } from '../models/User.js';
 import { getWeekStart } from '../services/weekStart.js';
+import { ensureWeeklyPlanForUser } from './plansController.js';
 
 function isAnswerArrayValid(arr, minQuestionsPerAxis = 3) {
   if (!Array.isArray(arr)) return false;
@@ -47,15 +48,32 @@ export async function createCheckin(req, res, next) {
 
     try {
       const created = await Checkin.create({
-        teamId: req.user.teamId,
-        userId: req.user.userId,
-        weekStart,
-        answers,
-        scores,
-        notes: String(req.body.notes || '').trim(),
-      });
+  teamId: req.user.teamId,
+  userId: req.user.userId,
+  weekStart,
+  answers,
+  scores,
+  notes: String(req.body.notes || '').trim(),
+});
 
-      return res.status(201).json({ checkin: created });
+// ✅ crear/reutilizar plan semanal inmediatamente
+let planResult = null;
+try {
+  planResult = await ensureWeeklyPlanForUser({
+    user: req.user,
+    baseDate: weekStart, // misma semana del checkin
+  });
+} catch (e) {
+  // No bloqueamos el checkin si falla el plan (IA, etc.)
+  planResult = null;
+}
+
+return res.status(201).json({
+  checkin: created,
+  plan: planResult
+    ? { _id: planResult.plan?._id, focusAxes: planResult.plan?.focusAxes, reused: planResult.reused }
+    : null,
+});
     } catch (e) {
       if (String(e.code) === '11000') {
         return res.status(409).json({ error: 'Check-in already exists for this week' });
