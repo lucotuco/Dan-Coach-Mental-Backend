@@ -269,6 +269,26 @@ export async function setItemDone(req, res, next) {
   }
 }
 
+export async function listMyPlans(req, res, next) {
+  try {
+    const limitRaw = Number(req.query.limit ?? 20);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 20;
+
+    const items = await WeeklyPlan.find({
+      teamId: req.user.teamId,
+      userId: req.user.userId,
+    })
+      .sort({ weekStart: -1 })
+      .limit(limit)
+      // evitamos mandar snapshot pesado al front
+      .select('-inputsSnapshot -aiMeta')
+      .lean();
+
+    return res.json({ items });
+  } catch (err) {
+    return next(err);
+  }
+}
 export async function teamWeekPlans(req, res, next) {
   try {
     const baseDate = req.query.date ? new Date(req.query.date) : new Date();
