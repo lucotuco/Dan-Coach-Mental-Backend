@@ -722,22 +722,5 @@ async function buildMemberContextText(userId, { weeks = 8 } = {}) {
   return lines.join('\n');
 }
 
-/**
- * GET /api/realtime/member-context?weeks=8
- * Devuelve texto “tool-friendly” con plan actual + últimos checkins.
- */
-export const getRealtimeMemberContext = async (req, res) => {
-  try {
-    const userId = getAuthUserId(req);
-    if (!userId) return res.status(401).json({ message: 'No autorizado.' });
 
-    const weeks = req.query.weeks ?? req.query.limit ?? 8;
-    const context = await buildMemberContextText(userId, { weeks });
-
-    return res.json({ ok: true, context });
-  } catch (err) {
-    console.error('Error getRealtimeMemberContext:', err);
-    return res.status(500).json({ message: 'Error interno al armar contexto member' });
-  }
-};
 
