@@ -92,7 +92,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/checkins', checkinRoutes);
 app.use('/api/plans', plansRoutes);
 //app.use('/api/dan', danRoutes);
-//app.use('/api/realtime', realtimeRoutes);
+app.use('/api/realtime', realtimeRoutes);
 //app.use('/api/did', didRoutes);
 //app.use('/api/tts', ttsRoutes);
 
