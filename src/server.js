@@ -6,7 +6,7 @@ import userRoutes from './routes/userRoutes.js';
 import checkinRoutes from './routes/checkinRoutes.js';
 import plansRoutes from './routes/planRoutes.js'
 //import danRoutes from './routes/danRoutes.js';
-//import realtimeRoutes from './routes/realtimeRoutes.js';
+import realtimeRoutes from './routes/realtimeRoutes.js';
 //import didRoutes from './routes/didRoutes.js';
 //import ttsRoutes from './routes/ttsRoutes.js';
 import authRoutes from './routes/authRoutes.js'
