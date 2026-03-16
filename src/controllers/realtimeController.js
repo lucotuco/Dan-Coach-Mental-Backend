@@ -2,7 +2,6 @@
 import crypto from 'crypto';
 import mongoose from 'mongoose';
 import { CoachSession } from '../models/CoachSession.js';
-import { Chequeo } from '../models/Chequeo.js';
 import { RealtimeSessionState } from '../models/RealtimeSessionState.js';
 import { SessionTranscript } from '../models/SessionTranscript.js';
 import { DanConversation } from '../models/DanConversation.js';
