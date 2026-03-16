@@ -15,6 +15,7 @@ Reglas:
 - items: 5 a 9 tareas checklist.
 - Cada item: { id, axis, title, description }.
 - id: string corto y único (ej: "disc-1", "conf-2").
+- la tarea puede ser visualizar/meditar/respirar, pero tiene que ser una de las ejercitaciones que tiene la app disponibles(tenes la lista abajo y para que sirve cada una).
 - No repitas ideas de semanas anteriores si tuvieron bajo cumplimiento.
 `;
 
@@ -37,7 +38,6 @@ Generá el plan semanal en el schema:
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    // ✅ esto es lo que hace que “piense más”
     reasoning: { effort }, // high / xhigh :contentReference[oaicite:2]{index=2}
   });
 

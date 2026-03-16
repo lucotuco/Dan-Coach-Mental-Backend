@@ -9,6 +9,9 @@ import { DanConversation } from '../models/DanConversation.js';
 import { DanMessage } from '../models/DanMessage.js';
 import { getCachedMemory, setCachedMemory } from '../services/memoryCache.js';
 import { upsertSessionTranscript } from '../services/sessionTranscriptStore.js';
+import { Checkin } from '../models/Chequeo.js';
+import { WeeklyPlan } from '../models/Plan.js';
+import { getWeekStart } from '../services/weekStart.js';
 import {
   buildContextPack,
   detectTopicShift,
@@ -222,8 +225,20 @@ const convoBlock = [
   .filter(Boolean)
   .join('\n\n');
 
-const mergedContext = [convoBlock, contextPack].filter(Boolean).join('\n\n');
+// ✅ SUMAR CONTEXTO APP NUEVA (plan + checkins) al instructions
+let memberContext = '';
+if (userId) {
+  try {
+    memberContext =
+      `=== APP_CONTEXT (plan + checkins) ===\n` +
+      (await buildMemberContextText(userId, { weeks: 8 })) +
+      `\n=== FIN_APP_CONTEXT ===`;
+  } catch (e) {
+    console.error('Error armando memberContext:', e);
+  }
+}
 
+const mergedContext = [convoBlock, contextPack, memberContext].filter(Boolean).join('\n\n');
 const instructions = buildRealtimeInstructions(DAN_BASE_INSTRUCTIONS, mergedContext);
 
 
@@ -534,8 +549,67 @@ export const getRealtimeSessions = async (req, res) => {
     return res.status(500).json({ message: 'Error interno al obtener sesiones realtime' });
   }
 };
+export const getRealtimeMemberContext = async (req, res) => {
+  try {
+    const userId = getAuthUserId(req);
+    if (!userId) return res.status(401).json({ message: 'No autorizado.' });
+
+    const weeks = Math.min(Math.max(parseInt(req.query.weeks ?? '8', 10), 1), 12);
+
+    // 1) último check-in y últimos N
+    const last = await Checkin.find({ userId: oid(userId) })
+      .sort({ weekStart: -1 })
+      .limit(weeks)
+      .select('weekStart scores notes createdAt')
+      .lean();
+
+    // 2) plan actual
+    const weekStart = getWeekStart(new Date());
+    const currentPlan = await WeeklyPlan.findOne({ userId: oid(userId), weekStart })
+      .select('weekStart focusAxes items status')
+      .lean();
+
+    const planPct = currentPlan?.items?.length
+      ? Number(((currentPlan.items.filter(i => i.done).length / currentPlan.items.length) * 100).toFixed(1))
+      : 0;
+
+    // 3) formateo para DAN (texto compacto)
+    const lines = [];
+    if (currentPlan) {
+      lines.push(`PLAN_SEMANAL_ACTUAL (${new Date(currentPlan.weekStart).toISOString().slice(0,10)}): foco=${(currentPlan.focusAxes||[]).join(', ')} | status=${currentPlan.status} | progreso=${planPct}%`);
+      const topTodo = (currentPlan.items || []).filter(i => !i.done).slice(0, 6).map(i => `- [ ] (${i.axis}) ${i.title}`).join('\n');
+      const topDone = (currentPlan.items || []).filter(i => i.done).slice(0, 4).map(i => `- [x] (${i.axis}) ${i.title}`).join('\n');
+      if (topTodo) lines.push(`ITEMS_PENDIENTES:\n${topTodo}`);
+      if (topDone) lines.push(`ITEMS_HECHOS:\n${topDone}`);
+    } else {
+      lines.push('PLAN_SEMANAL_ACTUAL: (no hay plan aún)');
+    }
+
+    if (last.length) {
+      lines.push(`CHECKINS_ULTIMAS_${last.length}_SEMANAS (más reciente primero):`);
+      for (const c of last) {
+        const d = c.weekStart ? new Date(c.weekStart).toISOString().slice(0,10) : 's/f';
+        const scores = c.scores ? Object.entries(c.scores).map(([k,v]) => `${k}=${Number(v).toFixed(1)}`).join(' | ') : '(sin scores)';
+        const notes = (c.notes || '').toString().trim();
+        lines.push(`- ${d} :: ${scores}${notes ? ` :: notes="${notes.slice(0,180)}"` : ''}`);
+      }
+    } else {
+      lines.push('CHECKINS: (sin historial)');
+    }
+
+    return res.json({
+      ok: true,
+      context: lines.join('\n'),
+      raw: { currentPlan, lastCheckins: last }, // opcional para debug
+    });
+  } catch (err) {
+    console.error('Error getRealtimeMemberContext:', err);
+    return res.status(500).json({ message: 'Error interno al armar contexto member' });
+  }
+};
 
 export const getRealtimeCheckups = async (req, res) => {
+  
   try {
     const userId = getAuthUserId(req);
     if (!userId) return res.status(401).json({ message: 'No autorizado.' });
@@ -581,3 +655,89 @@ export const getRealtimeCheckups = async (req, res) => {
     return res.status(500).json({ message: 'Error interno al obtener chequeos realtime' });
   }
 };
+// ===== MEMBER CONTEXT (app nueva: Checkin + WeeklyPlan) =====
+
+async function buildMemberContextText(userId, { weeks = 8 } = {}) {
+  const w = Math.min(Math.max(parseInt(String(weeks ?? 8), 10) || 8, 1), 12);
+
+  // 1) últimos check-ins (app nueva)
+  const last = await Checkin.find({ userId: oid(userId) })
+    .sort({ weekStart: -1 })
+    .limit(w)
+    .select('weekStart scores notes createdAt')
+    .lean();
+
+  // 2) plan semanal actual
+  const weekStart = getWeekStart(new Date());
+  const currentPlan = await WeeklyPlan.findOne({ userId: oid(userId), weekStart })
+    .select('weekStart focusAxes items status')
+    .lean();
+
+  const planPct = currentPlan?.items?.length
+    ? Number(((currentPlan.items.filter((i) => i.done).length / currentPlan.items.length) * 100).toFixed(1))
+    : 0;
+
+  const lines = [];
+
+  if (currentPlan) {
+    const ws = currentPlan.weekStart ? new Date(currentPlan.weekStart).toISOString().slice(0, 10) : 's/f';
+    lines.push(
+      `PLAN_SEMANAL_ACTUAL (${ws}): foco=${(currentPlan.focusAxes || []).join(', ')} | status=${currentPlan.status} | progreso=${planPct}%`
+    );
+
+    const topTodo = (currentPlan.items || [])
+      .filter((i) => !i.done)
+      .slice(0, 8)
+      .map((i) => `- [ ] (${i.axis}) ${i.title}`)
+      .join('\n');
+
+    const topDone = (currentPlan.items || [])
+      .filter((i) => i.done)
+      .slice(0, 5)
+      .map((i) => `- [x] (${i.axis}) ${i.title}`)
+      .join('\n');
+
+    if (topTodo) lines.push(`ITEMS_PENDIENTES:\n${topTodo}`);
+    if (topDone) lines.push(`ITEMS_HECHOS:\n${topDone}`);
+  } else {
+    lines.push('PLAN_SEMANAL_ACTUAL: (no hay plan aún)');
+  }
+
+  if (last.length) {
+    lines.push(`CHECKINS_ULTIMAS_${last.length}_SEMANAS (más reciente primero):`);
+    for (const c of last) {
+      const d = c.weekStart ? new Date(c.weekStart).toISOString().slice(0, 10) : 's/f';
+      const scores = c.scores
+        ? Object.entries(c.scores)
+            .map(([k, v]) => `${k}=${Number(v).toFixed(1)}`)
+            .join(' | ')
+        : '(sin scores)';
+      const notes = (c.notes || '').toString().trim();
+      lines.push(`- ${d} :: ${scores}${notes ? ` :: notes="${notes.slice(0, 180)}"` : ''}`);
+    }
+  } else {
+    lines.push('CHECKINS: (sin historial)');
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * GET /api/realtime/member-context?weeks=8
+ * Devuelve texto “tool-friendly” con plan actual + últimos checkins.
+ */
+export const getRealtimeMemberContext = async (req, res) => {
+  try {
+    const userId = getAuthUserId(req);
+    if (!userId) return res.status(401).json({ message: 'No autorizado.' });
+
+    const weeks = req.query.weeks ?? req.query.limit ?? 8;
+    const context = await buildMemberContextText(userId, { weeks });
+
+    return res.json({ ok: true, context });
+  } catch (err) {
+    console.error('Error getRealtimeMemberContext:', err);
+    return res.status(500).json({ message: 'Error interno al armar contexto member' });
+  }
+};
+
