@@ -1,113 +1,51 @@
-# Backend 2 – API Node.js + MongoDB
+# DAN Coach Mental - Backend API 🧠⚡
 
-Este directorio contiene un ejemplo mínimo de backend en Node.js/Express conectado a una base de datos MongoDB. A continuación tienes una guía paso a paso de lo que debes hacer **fuera** y **dentro** del proyecto para dejarlo funcionando.
+Este repositorio contiene la API principal de **DAN**, un coach mental deportivo impulsado por Inteligencia Artificial. Está construido con Node.js, Express y MongoDB, e integra el modelo de OpenAI para manejar sesiones de coaching en tiempo real y por texto, junto con un sistema avanzado de memoria a largo plazo (RAG).
 
-## 1. Pasos fuera del proyecto (configuración previa)
+## 🚀 Características Principales
+* **Autenticación y Roles:** Gestión de usuarios con roles de `coach` y `member` mediante JWT, y organización basada en equipos (`teams`)[cite: 1].
+* **Integración con OpenAI:** Soporte para la API de texto y la API Realtime de OpenAI, permitiendo interacciones de voz de baja latencia con el asistente[cite: 1].
+* **Memoria a Largo Plazo (RAG):** Generación automática de resúmenes de sesión, extracción de métricas, y almacenamiento vectorial para dotar a DAN de memoria contextual sobre el atleta[cite: 1].
+* **Gestión de Planes y Chequeos:** Endpoints para crear chequeos semanales de los atletas y generar planes de acción personalizados con IA basándose en los resultados[cite: 1].
+* **Cronjobs (Schedulers):** Procesos en segundo plano para consolidar y purgar la memoria de las sesiones automáticamente[cite: 1].
 
-1. **Instala Node.js y npm**
-   - Descarga la versión LTS desde [https://nodejs.org](https://nodejs.org) o usa `nvm install --lts` si prefieres Node Version Manager.
-   - Verifica la instalación ejecutando `node -v` y `npm -v`.
-2. **Crea tu clúster o instancia de MongoDB**
-   - En MongoDB Atlas: crea una cuenta, un clúster gratuito y un usuario con contraseña.
-   - En MongoDB local: instala el servidor (`mongod`) y asegúrate de que esté escuchando (por defecto en `mongodb://127.0.0.1:27017`).
-3. **Obtén la cadena de conexión (connection string)**
-   - Atlas provee algo como `mongodb+srv://<usuario>:<password>@<cluster>/<database>?retryWrites=true&w=majority`.
-   - Localmente sería `mongodb://localhost:27017/miBase`.
-4. **Configura las IPs permitidas (solo Atlas)**
-   - En la sección *Network Access*, agrega tu IP pública o habilita `0.0.0.0/0` mientras desarrollas.
+## 🛠️ Tecnologías Utilizadas
+* **Entorno:** Node.js + Express[cite: 1].
+* **Base de Datos:** MongoDB (Mongoose)[cite: 1].
+* **IA y Media:** `openai`, `ffmpeg-static`, `multer` (para procesamiento de audios)[cite: 1].
+* **Seguridad:** `bcryptjs` (hash de contraseñas), `jsonwebtoken` (Auth)[cite: 1].
 
-## 2. Pasos dentro del proyecto (este directorio)
+## ⚙️ Instalación y Configuración local
 
-1. **Instala las dependencias**
-   ```bash
-   cd "backend 2"
+1. **Clonar el repositorio y entrar a la carpeta:**
+   \`\`\`bash
+   cd lucotuco-dan-coach-mental-backend
+   \`\`\`
+
+2. **Instalar las dependencias:**
+   \`\`\`bash
    npm install
-   ```
-   Si estás detrás de un proxy, configura las variables `HTTP_PROXY`/`HTTPS_PROXY` o ejecuta `npm config set proxy http://usuario:pass@proxy:puerto`.
-2. **Copia el archivo de variables de entorno**
-   ```bash
+   \`\`\`
+
+3. **Configurar las variables de entorno:**
+   Copia el archivo de ejemplo para crear tu propio entorno local:
+   \`\`\`bash
    cp .env.example .env
-   ```
-   - Edita `.env` y reemplaza `MONGODB_URI` con la cadena que obtuviste antes.
-   - Ajusta `PORT` o `CORS_ORIGIN` si lo necesitas.
-3. **Ejecuta el backend en modo desarrollo**
-   ```bash
+   \`\`\`
+   Asegúrate de rellenar al menos las siguientes variables clave en tu nuevo archivo `.env`[cite: 1]:
+   * `MONGODB_URI`: Tu cadena de conexión a MongoDB (Atlas o Local)[cite: 1].
+   * `JWT_SECRET`: Una clave secreta segura para firmar los tokens de sesión[cite: 1].
+   * `OPENAI_API_KEY`: Tu clave de la API de OpenAI[cite: 1].
+   * `CORS_ORIGIN`: Las URLs de tu Frontend permitidas (ej. `http://localhost:8081`)[cite: 1].
+
+4. **Levantar el servidor en modo desarrollo:**
+   \`\`\`bash
    npm run dev
-   ```
-   - El servidor se levanta en `http://localhost:4000` (o el puerto que definas).
-   - Si la conexión a MongoDB es exitosa verás `✅ MongoDB connection established` y luego `🚀 API listening...` en consola.
-4. **Variables para la integración con Dan (OpenAI)**
-   - Define `OPENAI_API_KEY` en tu `.env` para que el servicio de coaching mental funcione.
-   - Opcional: `DAN_MODEL` para cambiar el modelo por defecto (`gpt-4.1-mini`).
-5. **Prueba la API**
-   - `GET http://localhost:4000/health` → estado del servicio.
-   - `POST http://localhost:4000/api/dan/chat` → conversación con Dan (ver detalles más abajo).
-6. **Conecta tu frontend**
-   - Desde el frontend, usa `fetch`/`axios` hacia las rutas anteriores y asegúrate de apuntar a la misma URL que definiste en `CORS_ORIGIN`.
+   \`\`\`
+   El servidor iniciará (por defecto en el puerto `4000`) y verás el mensaje `✅DB: dan2` confirmando la conexión a la base de datos[cite: 1].
 
-### Endpoint `POST /api/dan/chat`
-
-Endpoint pensado para Expo/React Native que mantiene el contexto de la conversación con Dan usando el Responses API de OpenAI.
-
-- **Headers**: `Content-Type: application/json`
-- **Body**:
-  ```json
-  {
-    "userId": "<id del usuario en MongoDB>",
-    "message": "Texto del usuario",
-    "type": "general" ,
-    "conversationId": "<opcional, si ya existe>",
-    "chequeoId": "<opcional, si nace de un chequeo>"
-  }
-  ```
-  - `type` agrupa conversaciones (por ejemplo: "chequeo", "rutina", etc.). Si no se envía, se usa `general`.
-  - `conversationId` permite reanudar una conversación existente; si no se envía, se busca la última por `type` o se crea una nueva.
-
-- **Response**:
-  ```json
-  {
-    "conversationId": "<id de la conversación>",
-    "message": "Respuesta de Dan",
-    "lastResponseId": "<id del Responses API para mantener contexto>",
-    "historySummary": "Resumen acumulado del diálogo",
-    "model": "gpt-4.1-mini",
-    "type": "general",
-    "userMessageId": "<id del mensaje de usuario guardado>",
-    "assistantMessageId": "<id del mensaje de Dan guardado>"
-  }
-  ```
-  - `historySummary` es el historial condensado que Dan usa como contexto junto con `previous_response_id`.
-  - El perfil deportivo del usuario (`danProfile` en el modelo `User`) se incluye automáticamente en el prompt.
-
-## 3. Estructura de carpetas
-
-```
-backend 2
-├── .env.example        # Plantilla de variables de entorno
-├── package.json        # Scripts y dependencias
-└── src
-    ├── config
-    │   └── mongo.js    # Configuración de la conexión a MongoDB
-    ├── controllers
-    │   └── noteController.js
-    ├── models
-    │   └── Note.js
-    ├── routes
-    │   └── noteRoutes.js
-    └── server.js       # Punto de entrada del servidor Express
-```
-
-## 4. ¿Cómo se conecta todo?
-
-1. `src/server.js` arranca Express, carga las variables de entorno y llama a `connectToDatabase`.
-2. `connectToDatabase` (en `src/config/mongo.js`) usa Mongoose para abrir una conexión persistente con MongoDB.
-3. Una vez conectados, Express expone las rutas `/api/notes`, que dependen del modelo `Note` definido en `src/models/Note.js`.
-4. Puedes replicar este patrón para tus propios modelos/controladores/rutas.
-
-## 5. Próximos pasos sugeridos
-
-- Agrega validaciones adicionales con librerías como `zod` o `joi`.
-- Implementa autenticación (JWT, OAuth, etc.) según tus necesidades.
-- Crea un script de despliegue (`docker-compose`, Render, Railway, etc.) usando la misma variable `MONGODB_URI`.
-
-> ⚠️ **Recuerda:** este repositorio no incluye `node_modules`. Cada desarrollador debe ejecutar `npm install` localmente.
+## 📂 Estructura del Proyecto
+* `/src/controllers`: Lógica de negocio de las rutas (Auth, Checkins, Dan, Plans, Realtime, Teams)[cite: 1].
+* `/src/models`: Esquemas de Mongoose (`User`, `Chequeo`, `DanConversation`, `WeeklyPlan`, etc.)[cite: 1].
+* `/src/routes`: Definición de los endpoints de la API[cite: 1].
+* `/src/services`: Servicios externos y utilidades clave (Cliente de OpenAI, reconciliadores de memoria, generadores de planes)[cite: 1].
